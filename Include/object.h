@@ -152,44 +152,39 @@ whose size is determined when the object is allocated.
         ob->ob_size = size;
     }
 #define Py_SET_SIZE(ob, size) _Py_SET_SIZE(_PyVarObject_CAST(ob), size)
-#include "uthash.h"
+    // #include "uthash.h"
     /* My struct of bookkeep*/
-    typedef struct
-    {
-        unsigned long inc_diff;
-        unsigned long dec_diff;
-    } Temperature;
+    // typedef struct
+    // {
+    //     unsigned long inc_diff;
+    //     unsigned long dec_diff;
+    // } Temperature;
 
-    /* hash of hashes */
-    typedef struct
-    {
-        PyObject *op;     // key
-        Temperature temp; // value
-        UT_hash_handle hh;
-    } CurTimeObjHeat;
+    // /* hash of hashes */
+    // typedef struct
+    // {
+    //     PyObject *op;     // key
+    //     Temperature temp; // value
+    //     UT_hash_handle hh;
+    // } CurTimeObjHeat;
     typedef struct
     {
         unsigned int sample_dur;
         FILE *fd;
     } BookkeepArgs;
 
-    typedef struct
-    {
-        time_t timestamp;               // key
-        CurTimeObjHeat *curTimeObjHeat; // value
-        UT_hash_handle hh;
-    } RefTrackHeatmapHash;
-    extern RefTrackHeatmapHash *allHeats;
+    // typedef struct
+    // {
+    //     time_t timestamp;               // key
+    //     CurTimeObjHeat *curTimeObjHeat; // value
+    //     UT_hash_handle hh;
+    // } RefTrackHeatmapHash;
+    // extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
-    extern pthread_t bookkeepingThread;
-    extern pthread_mutex_t refcnt_bookkeep_lock;
-    extern volatile short terminate_flag;
     extern volatile short terminate_flag_dummy;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
     PyAPI_FUNC(void *) test_thread_func(void *arg);
-    PyAPI_FUNC(void) refcnt_bookkeep();
-    PyAPI_FUNC(int) test_thread_call();
     PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
     // CurTimeObjHeat *curTimeObjHeat = NULL;

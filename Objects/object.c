@@ -2359,12 +2359,10 @@ extern "C"
 
 // my own tracing starts here
 #define NUM_THREADS 1
-    volatile short terminate_flag = 0;
     // BookkeepArgs bookkeepArgs = {0, "test_heats.txt"};
     volatile short terminate_flag_dummy = 0;
-    RefTrackHeatmapHash *allHeats = NULL;
+    // RefTrackHeatmapHash *allHeats = NULL;
     unsigned int SAMPLE_DUR; // sample duration, default 0.5 s
-    pthread_mutex_t refcnt_bookkeep_lock = PTHREAD_MUTEX_INITIALIZER;
     // Function that each thread will execute
     // void *thread_function(void *arg)
     // {
@@ -2388,25 +2386,6 @@ extern "C"
     //     fclose(output_fd);
     //     fprintf(stderr, "finish testing thread\n");
     //     terminate_flag = 0; // before exit, reset terminate flag
-    //     return NULL;
-    // }
-    // void *thread_function_dummy(void *arg)
-    // {
-    //     // pthread_mutex_lock(&refcnt_bookkeep_lock);
-    //     FILE *out_fd = fopen("heats.txt", "w");
-    //     if (out_fd == NULL)
-    //     {
-    //         perror("Failed to open file\n");
-    //     }
-    //     while (!terminate_flag)
-    //     {
-    //         _Py_PrintReferenceAddresses(out_fd);
-    //         usleep(500000);
-    //     }
-    //     fclose(out_fd);
-    //     fprintf(out_fd, "finish testing thread\n");
-    //     terminate_flag = 0;
-    //     // pthread_mutex_unlock(&refcnt_bookkeep_lock);
     //     return NULL;
     // }
     void *test_thread_func(void *arg)
@@ -2445,6 +2424,7 @@ extern "C"
         }
         if (bookkeep_args->sample_dur == 0)
         {
+            fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
             bookkeep_args->sample_dur = 500000;
         }
         while (!terminate_flag_dummy)
@@ -2461,110 +2441,85 @@ extern "C"
             Py_BEGIN_ALLOW_THREADS
                 usleep(bookkeep_args->sample_dur);
             Py_END_ALLOW_THREADS
-                RefTrackHeatmapHash *outter_item,
-                *tmp_outter;
-            CurTimeObjHeat *inner_item, *tmp_inner;
-            RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
-            oneColumnHeat->timestamp = time(NULL);
-            oneColumnHeat->curTimeObjHeat = NULL;
-            HASH_ADD_INT(allHeats, timestamp, oneColumnHeat);
-            struct timespec ts;
+                // RefTrackHeatmapHash *outter_item,
+                // *tmp_outter;
+                // CurTimeObjHeat *inner_item, *tmp_inner;
+                // RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
+                // oneColumnHeat->timestamp = time(NULL);
+                // oneColumnHeat->curTimeObjHeat = NULL;
+                // HASH_ADD_INT(allHeats, timestamp, oneColumnHeat);
+                struct timespec ts;
             clock_gettime(CLOCK_MONOTONIC, &ts);
             for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
             {
-                CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                curTimeObjHeat->op = op;
-                curTimeObjHeat->temp.inc_diff = (op->cur_inc_count - op->prev_inc_count);
-                curTimeObjHeat->temp.dec_diff = (op->cur_dec_count - op->prev_dec_count);
-                HASH_ADD_PTR(allHeats->curTimeObjHeat, op, curTimeObjHeat);
-                fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", ts.tv_sec, ts.tv_nsec, curTimeObjHeat->op, curTimeObjHeat->temp.inc_diff, curTimeObjHeat->temp.dec_diff);
-                if (fflush(bookkeep_args->fd) != 0)
-                {
-                    fprintf(stderr, "Failed to flush data\n");
-                }
+                // CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
+                // curTimeObjHeat->op = op;
+                // curTimeObjHeat->temp.inc_diff = (op->cur_inc_count - op->prev_inc_count);
+                // curTimeObjHeat->temp.dec_diff = (op->cur_dec_count - op->prev_dec_count);
+                // HASH_ADD_PTR(allHeats->curTimeObjHeat, op, curTimeObjHeat);
+                // fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", ts.tv_sec, ts.tv_nsec, curTimeObjHeat->op, curTimeObjHeat->temp.inc_diff, curTimeObjHeat->temp.dec_diff);
+                Py_ssize_t inc_diff = op->cur_inc_count - op->prev_inc_count;
+                Py_ssize_t dec_diff = op->cur_dec_count - op->prev_dec_count;
+                fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", ts.tv_sec, ts.tv_nsec, op, inc_diff, dec_diff);
+                // if (fflush(bookkeep_args->fd) != 0)
+                // {
+                //     fprintf(stderr, "Failed to flush data\n");
+                // }
             }
             // release the current hashmap
-            HASH_ITER(hh, allHeats, outter_item, tmp_outter)
-            {
-                HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-                {
-                    HASH_DEL(outter_item->curTimeObjHeat, inner_item);
-                    free(inner_item);
-                }
-                HASH_DEL(allHeats, outter_item);
-                free(outter_item);
-            }
+            // HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+            // {
+            //     HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+            //     {
+            //         HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+            //         free(inner_item);
+            //     }
+            //     HASH_DEL(allHeats, outter_item);
+            //     free(outter_item);
+            // }
         }
         // fclose(output_fd);
-        terminate_flag_dummy = 0; // before exit, reset terminate flag
+        terminate_flag_dummy = 0; // jumping out bookkeep, but reset terminate flag before exiting
         fprintf(stderr, "finish recording, shutdown\n");
         // return NULL;
         PyGILState_Release(gstate);
     }
-    pthread_t bookkeepingThread;
-    // void refcnt_bookkeep()
+    // void test_nested_hashtable()
     // {
+    //     RefTrackHeatmapHash *item1, *tmp1;
+    //     CurTimeObjHeat *item2, *tmp2;
+    //     RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
+    //     oneColumnHeat->timestamp = time(NULL);
+    //     oneColumnHeat->curTimeObjHeat = NULL;
+    //     HASH_ADD_INT(allHeats, timestamp, oneColumnHeat);
 
-    //     if (pthread_create(&bookkeepingThread, NULL, thread_function, &bookkeepingThread) != 0)
+    //     PyObject *fakeOp;
+    //     CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
+    //     curTimeObjHeat->op = fakeOp;
+    //     curTimeObjHeat->temp.inc_diff = 123;
+    //     curTimeObjHeat->temp.dec_diff = 4265;
+    //     HASH_ADD_PTR(allHeats->curTimeObjHeat, op, curTimeObjHeat);
+
+    //     HASH_ITER(hh, allHeats, item1, tmp1)
     //     {
-    //         // fprintf(stderr, "failed to spawn pthread\n");
-    //         perror("failed to spawn pthread");
-    //         // return -1;
+    //         HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
+    //         {
+    //             printf("%ld\t%p\t%d\t%d\n", allHeats->timestamp, item2->op, item2->temp.inc_diff, item2->temp.dec_diff);
+    //         }
     //     }
-    //     // usleep(3000000); // 3s
-    //     // terminate_flag = 1;
-    //     // pthread_join(bookkeepingThread, NULL);
-    //     // pthread_mutex_unlock(&refcnt_bookkeep_lock);
-    //     // return 0;
-    // }
-    // pthread_t bookkeepingThread;
-    // void test_call_pthread_again()
-    // {
-    //     if (pthread_create(&bookkeepingThread, NULL, thread_function, &bookkeepingThread) != 0)
+
+    //     /* clean up both hash tables */
+    //     HASH_ITER(hh, allHeats, item1, tmp1)
     //     {
-    //         perror("failed to spawn pthread");
-    //         // fprintf(stderr, "failed to spawn pthread\n");
+    //         HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
+    //         {
+    //             HASH_DEL(item1->curTimeObjHeat, item2);
+    //             free(item2);
+    //         }
+    //         HASH_DEL(allHeats, item1);
+    //         free(item1);
     //     }
-    //     usleep(3000000); // 3s
-    //     terminate_flag = 1;
-    //     pthread_join(bookkeepingThread, NULL);
     // }
-    void test_nested_hashtable()
-    {
-        RefTrackHeatmapHash *item1, *tmp1;
-        CurTimeObjHeat *item2, *tmp2;
-        RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
-        oneColumnHeat->timestamp = time(NULL);
-        oneColumnHeat->curTimeObjHeat = NULL;
-        HASH_ADD_INT(allHeats, timestamp, oneColumnHeat);
-
-        PyObject *fakeOp;
-        CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-        curTimeObjHeat->op = fakeOp;
-        curTimeObjHeat->temp.inc_diff = 123;
-        curTimeObjHeat->temp.dec_diff = 4265;
-        HASH_ADD_PTR(allHeats->curTimeObjHeat, op, curTimeObjHeat);
-
-        HASH_ITER(hh, allHeats, item1, tmp1)
-        {
-            HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
-            {
-                printf("%ld\t%p\t%d\t%d\n", allHeats->timestamp, item2->op, item2->temp.inc_diff, item2->temp.dec_diff);
-            }
-        }
-
-        /* clean up both hash tables */
-        HASH_ITER(hh, allHeats, item1, tmp1)
-        {
-            HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
-            {
-                HASH_DEL(item1->curTimeObjHeat, item2);
-                free(item2);
-            }
-            HASH_DEL(allHeats, item1);
-            free(item1);
-        }
-    }
 
 #ifdef __cplusplus
 }
