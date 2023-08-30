@@ -152,34 +152,36 @@ whose size is determined when the object is allocated.
         ob->ob_size = size;
     }
 #define Py_SET_SIZE(ob, size) _Py_SET_SIZE(_PyVarObject_CAST(ob), size)
-    // #include "uthash.h"
-    /* My struct of bookkeep*/
-    // typedef struct
-    // {
-    //     unsigned long inc_diff;
-    //     unsigned long dec_diff;
-    // } Temperature;
+#include "uthash.h"
+    typedef struct
+    {
+        unsigned long inc_diff;
+        unsigned long dec_diff;
+    } Temperature;
 
     // /* hash of hashes */
-    // typedef struct
-    // {
-    //     PyObject *op;     // key
-    //     Temperature temp; // value
-    //     UT_hash_handle hh;
-    // } CurTimeObjHeat;
+    typedef struct
+    {
+        PyObject *op;     // key
+        Temperature temp; // value
+        UT_hash_handle hh;
+    } CurTimeObjHeat;
+
+    typedef struct
+    {
+        // time_t timestamp;               // key
+        struct timespec ts;             // key
+        CurTimeObjHeat *curTimeObjHeat; // value
+        UT_hash_handle hh;
+    } RefTrackHeatmapHash;
     typedef struct
     {
         unsigned int sample_dur;
         FILE *fd;
+        unsigned int buff_size;
+        PyObject *doIO;
     } BookkeepArgs;
-
-    // typedef struct
-    // {
-    //     time_t timestamp;               // key
-    //     CurTimeObjHeat *curTimeObjHeat; // value
-    //     UT_hash_handle hh;
-    // } RefTrackHeatmapHash;
-    // extern RefTrackHeatmapHash *allHeats;
+    extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
     extern volatile short terminate_flag_dummy;
     extern BookkeepArgs bookkeepArgs;
