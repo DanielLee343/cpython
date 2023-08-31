@@ -1,7 +1,7 @@
 def matmul_list():
     import random
 
-    matrix_size = 600
+    matrix_size = 300
     matrix_A = [[random.randint(1, 10) for _ in range(matrix_size)] for _ in range(matrix_size)]
     matrix_B = [[random.randint(1, 10) for _ in range(matrix_size)] for _ in range(matrix_size)]
 
@@ -19,7 +19,7 @@ def matmul_list():
 
 def matmul_numpy():
     import numpy as np
-    n = 11000
+    n = 2000
     # int(sys.argv[1])
     A = np.random.rand(n, n)
     B = np.random.rand(n, n)
@@ -31,7 +31,7 @@ def matmul_numpy():
     print("latency: ", latency)
 
 def linpack_numpy():
-    n = 15000
+    n = 4500
     from numpy import matrix, linalg, random
     # LINPACK benchmarks
     ops = (2.0 * n) * n * n / 3.0 + (2.0 * n) * n
@@ -61,12 +61,12 @@ def linpack_numpy():
     # return result
 
 import time
-import os
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-# import threadmodule
-# threadmodule.start_thread(100000, 40960, "/home/lyuze/workspace/obj_heats/matmul_list.txt", True)
+# import os
+# os.environ["OPENBLAS_NUM_THREADS"] = "1"
+# os.environ["MKL_NUM_THREADS"] = "1"
+import threadmodule
+threadmodule.start_thread(100000, 10240, "/home/lyuze/workspace/obj_heats/matmul_list.txt", True)
 matmul_list()
-# threadmodule.close_thread()
-# time.sleep(3)
+threadmodule.close_thread()
+time.sleep(3)
 print("all finished")

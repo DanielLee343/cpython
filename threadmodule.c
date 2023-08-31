@@ -46,7 +46,7 @@ static PyObject *start_thread(PyObject *self, PyObject *args)
     unsigned int buff_size;
     const char *file;
     PyObject* doIO;
-    if (!PyArg_ParseTuple(args, "iisO", &sample_dur, &buff_size, &file, &doIO))
+    if (!PyArg_ParseTuple(args, "ii|sO", &sample_dur, &buff_size, &file, &doIO))
     {
         return NULL; // error
     }
