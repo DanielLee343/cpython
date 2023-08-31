@@ -82,7 +82,7 @@ whose size is determined when the object is allocated.
 #define PyObject_HEAD PyObject ob_base;
 
 #define PyObject_HEAD_INIT(type) \
-    {_PyObject_EXTRA_INIT 1, type, 0, 0, 0, 0},
+    {_PyObject_EXTRA_INIT 1, type, 0,0,0,0,0},
 
 #define PyVarObject_HEAD_INIT(type, size) \
     {PyObject_HEAD_INIT(type) size},
@@ -106,6 +106,7 @@ whose size is determined when the object is allocated.
         _PyObject_HEAD_EXTRA
             Py_ssize_t ob_refcnt;
         PyTypeObject *ob_type;
+        Py_ssize_t prev_refcnt;
         Py_ssize_t cur_inc_count; // same with ob_refcnt, but keeps increasing
         Py_ssize_t prev_inc_count;
         Py_ssize_t cur_dec_count; // keeps increasing when decref is called
@@ -162,7 +163,7 @@ whose size is determined when the object is allocated.
     // /* hash of hashes */
     typedef struct
     {
-        PyObject *op;     // key
+        PyObject *op_;     // key
         Temperature temp; // value
         UT_hash_handle hh;
     } CurTimeObjHeat;
@@ -185,7 +186,7 @@ whose size is determined when the object is allocated.
     extern unsigned int SAMPLE_DUR;
     extern volatile short terminate_flag_dummy;
     extern BookkeepArgs bookkeepArgs;
-    PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
+    PyAPI_FUNC(PyObject *) ref_cnt_changes(PyObject *arg);
     PyAPI_FUNC(void *) test_thread_func(void *arg);
     PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
@@ -450,7 +451,7 @@ given type object has a specified feature.
         _Py_RefTotal++;
 #endif
         op->ob_refcnt++;
-        op->cur_inc_count++; // bookkeep refcnt inc
+        // op->cur_inc_count++; // bookkeep refcnt inc
     }
 
 #define Py_INCREF(op) _Py_INCREF(_PyObject_CAST(op))
@@ -464,7 +465,7 @@ given type object has a specified feature.
 #ifdef Py_REF_DEBUG
         _Py_RefTotal--;
 #endif
-        op->cur_dec_count++; // bookkeep refcnt dec
+        // op->cur_dec_count++; // bookkeep refcnt dec
         if (--op->ob_refcnt != 0)
         {
 #ifdef Py_REF_DEBUG
