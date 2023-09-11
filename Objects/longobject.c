@@ -261,8 +261,9 @@ _PyLong_New(Py_ssize_t size)
                         "too many digits in integer");
         return NULL;
     }
-    result = PyObject_MALLOC(offsetof(PyLongObject, ob_digit) +
-                             size*sizeof(digit));
+    size_t offsets = offsetof(PyLongObject, ob_digit);
+    size_t bytes_needed = offsets + size*sizeof(digit);
+    result = PyObject_MALLOC(bytes_needed);
     if (!result) {
         PyErr_NoMemory();
         return NULL;

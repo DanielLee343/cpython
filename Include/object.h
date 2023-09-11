@@ -69,9 +69,10 @@ whose size is determined when the object is allocated.
 /* Define pointers to support a doubly-linked list of all live heap objects. */
 #define _PyObject_HEAD_EXTRA  \
     struct _object *_ob_next; \
-    struct _object *_ob_prev;
+    struct _object *_ob_prev; \
+    Py_ssize_t prev_refcnt;
 
-#define _PyObject_EXTRA_INIT 0, 0,
+#define _PyObject_EXTRA_INIT 0, 0, 0,
 
 #else
 #define _PyObject_HEAD_EXTRA
@@ -82,7 +83,7 @@ whose size is determined when the object is allocated.
 #define PyObject_HEAD PyObject ob_base;
 
 #define PyObject_HEAD_INIT(type) \
-    {_PyObject_EXTRA_INIT 1, type, 0,0,0,0,0},
+    {_PyObject_EXTRA_INIT 1, type},
 
 #define PyVarObject_HEAD_INIT(type, size) \
     {PyObject_HEAD_INIT(type) size},
@@ -106,11 +107,11 @@ whose size is determined when the object is allocated.
         _PyObject_HEAD_EXTRA
             Py_ssize_t ob_refcnt;
         PyTypeObject *ob_type;
-        Py_ssize_t prev_refcnt;
-        Py_ssize_t cur_inc_count; // same with ob_refcnt, but keeps increasing
-        Py_ssize_t prev_inc_count;
-        Py_ssize_t cur_dec_count; // keeps increasing when decref is called
-        Py_ssize_t prev_dec_count;
+        // Py_ssize_t prev_refcnt;
+        // Py_ssize_t cur_inc_count; // same with ob_refcnt, but keeps increasing
+        // Py_ssize_t prev_inc_count;
+        // Py_ssize_t cur_dec_count; // keeps increasing when decref is called
+        // Py_ssize_t prev_dec_count;
     } PyObject;
 
 /* Cast argument to PyObject* type. */
@@ -156,8 +157,10 @@ whose size is determined when the object is allocated.
 #include "uthash.h"
     typedef struct
     {
-        unsigned long inc_diff;
-        unsigned long dec_diff;
+        // unsigned long inc_diff;
+        // unsigned long dec_diff;
+        long diff;
+        size_t sizeof_op;
     } Temperature;
 
     // /* hash of hashes */
@@ -186,7 +189,7 @@ whose size is determined when the object is allocated.
     extern unsigned int SAMPLE_DUR;
     extern volatile short terminate_flag_dummy;
     extern BookkeepArgs bookkeepArgs;
-    PyAPI_FUNC(PyObject *) ref_cnt_changes(PyObject *arg);
+    PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
     PyAPI_FUNC(void *) test_thread_func(void *arg);
     PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
