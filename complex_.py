@@ -59,27 +59,17 @@ def horner_evaluate(coeffs, x_values):
 
     return results
 
-# Main function to perform calculations
-def main():
+def complex_func():
     start_time = time.time()
-
-    # Monte Carlo Pi approximation
     for i in range(8):
         pi_value = monte_carlo_pi(10000000)
-        # print(f"Approximated value of Pi: {pi_value}")
-
-        # Fibonacci using matrix exponentiation
         fib_value = fib(300)
-    # print(f"Fibonacci(30): {fib_value}")
-
-    # Polynomial evaluation
-        polynomial = [2.496, -3.208, 5.279, -2.765]  # 2 - 3x + 5x^2 - 2x^3
+        polynomial = [2.496, -3.208, 5.279, -2.765]
         x_values = [0, 1, 2, 3]
         y_values = horner_evaluate(polynomial, x_values)
-    # print(f"Polynomial values at {x_values}: {y_values}")
 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

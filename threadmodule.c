@@ -7,11 +7,7 @@
 static PyObject *global_var = NULL;
 volatile int terminate_thread_flag = 0;
 FILE *output_fd = NULL;
-// typedef struct
-// {
-//     unsigned int sample_dur;
-//     char *out_file;
-// } BookkeepArgs;
+
 static void thread_func(void *arg)
 {
     PyGILState_STATE gstate;
@@ -50,16 +46,16 @@ static PyObject *start_thread(PyObject *self, PyObject *args)
     {
         return NULL; // error
     }
-    if (PyBool_Check(doIO)) {
-        if (PyObject_IsTrue(doIO)) {
-            fprintf(stderr, "do IO\n");
-        } else {
-            fprintf(stderr, "not do IO\n");
-        }
-    } else {
-        PyErr_SetString(PyExc_TypeError, "Expected a boolean object.");
-        return NULL; 
-    }
+    // if (PyBool_Check(doIO)) {
+    //     if (PyObject_IsTrue(doIO)) {
+    //         fprintf(stderr, "do IO\n");
+    //     } else {
+    //         fprintf(stderr, "not do IO\n");
+    //     }
+    // } else {
+    //     PyErr_SetString(PyExc_TypeError, "Expected a boolean object.");
+    //     return NULL; 
+    // }
     fprintf(stderr, "file is %s, sample dur is %d\n", file, sample_dur);
     BookkeepArgs *bookkeepArgs = (BookkeepArgs *)malloc(sizeof(BookkeepArgs));
     output_fd = fopen(file, "w");
@@ -72,7 +68,7 @@ static PyObject *start_thread(PyObject *self, PyObject *args)
     bookkeepArgs->buff_size = buff_size;
     bookkeepArgs->doIO = doIO;
 
-    fprintf(stderr, "buff size in shared module is %d\n", bookkeepArgs->buff_size);
+    // fprintf(stderr, "buff size in shared module is %d\n", bookkeepArgs->buff_size);
     long thread_id = PyThread_start_new_thread(ref_cnt_changes, (void *)bookkeepArgs);
     if (thread_id == -1)
     {

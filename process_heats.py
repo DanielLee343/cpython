@@ -1,26 +1,26 @@
 import pandas as pd
 import os
-
-org_heats_dir = "/home/lyuze/cpython/obj_heats"
-interested_file = "linpack_np_heats.txt"
+# /home/lyuze/workspace/obj_heats/matmul_list.txt
+org_heats_dir = "/home/lyuze/workspace/obj_heats"
+interested_file = "matmul_list.txt"
 org_heats_file = os.path.join(org_heats_dir, interested_file)
-columns = ["timestamp", "addr", "inc", "dec"]
+columns = ["timestamp", "addr", "diff"]
 org_df = pd.read_csv(org_heats_file, sep="\t", header=None, names=columns)
 org_df['addr'] = org_df['addr'].apply(lambda x: int(x, 16))
-print(org_df)
+# print(org_df)
 
 # group the df by timestamp and sort the addr
 org_df = org_df.sort_values(by=['timestamp', 'addr'])
-print(org_df)
+# print(org_df)
 sorted_file = os.path.join(org_heats_dir, "heats_sorted.txt")
 org_df.to_csv(sorted_file, sep='\t', index=False, header=False)
 
 # Filter out rows where both inc and dec are zeros
-filtered_df = org_df[(org_df["inc"] != 0) & (org_df["dec"] != 0)]
-sorted_filtered_file = os.path.join(org_heats_dir, "heats_sorted_filtered.txt")
-filtered_df.to_csv(sorted_filtered_file, sep='\t', index=False, header=False)
+# filtered_df = org_df[(org_df["inc"] != 0) & (org_df["dec"] != 0)]
+# sorted_filtered_file = os.path.join(org_heats_dir, "heats_sorted_filtered.txt")
+# filtered_df.to_csv(sorted_filtered_file, sep='\t', index=False, header=False)
 
-filtered_df_no_ones = filtered_df[(filtered_df["inc"] != 1) & (filtered_df["dec"] != 1)]
+filtered_df_no_ones = org_df[(org_df["diff"] != 1)]
 sorted_filtered_no_ones_file = os.path.join(org_heats_dir, "heats_sorted_no_ones_filtered.txt")
 filtered_df_no_ones.to_csv(sorted_filtered_no_ones_file, sep='\t', index=False, header=False)
 
