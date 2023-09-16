@@ -2421,9 +2421,6 @@ extern "C"
             fprintf(stderr, "buff_size not set, setting to 1024\n");
             buff_size = 5120;
         }
-        // fprintf(stderr, "file passed is: %s\n", bookkeep_args->out_file);
-        // FILE *output_fd = fopen(bookkeep_args->out_file, "w");
-        // FILE *output_fd = (FILE *)(arg);
         if (bookkeep_args->fd == NULL)
         {
             perror("Failed to find fd passed in\n");
@@ -2433,25 +2430,18 @@ extern "C"
             fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
             bookkeep_args->sample_dur = 500000;
         }
-        // PyObject *doIO = ;
-        int doIO_ = PyObject_IsTrue(bookkeep_args->doIO);
+        unsigned int doIO_ = bookkeep_args->doIO;
+        RefTrackHeatmapHash *outter_item, *tmp_outter;
+        CurTimeObjHeat *inner_item, *tmp_inner;
         while (!terminate_flag_dummy)
         {
-            // update prev_counter
             PyGILState_STATE gstate = PyGILState_Ensure();
             PyObject *op;
             for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
             {
-                // op->prev_inc_count = op->cur_inc_count; // bookkeep previous refcnts
-                // op->prev_dec_count = op->cur_dec_count;
                 op->prev_refcnt = op->ob_refcnt;
             }
-
-            // sampling...
-
             Py_BEGIN_ALLOW_THREADS
-                // struct timespec ts;
-                // clock_gettime(CLOCK_MONOTONIC, &ts);
                 usleep(bookkeep_args->sample_dur);
             Py_END_ALLOW_THREADS
             RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
@@ -2462,67 +2452,41 @@ extern "C"
             for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
             {
                 CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                // curTimeObjHeat->temp.inc_diff = op->cur_inc_count - op->prev_inc_count;
-                // curTimeObjHeat->temp.dec_diff = op->cur_dec_count - op->prev_dec_count;
-                // if (op->ob_refcnt >= op->prev_refcnt) {
-                //     curTimeObjHeat->temp.inc_diff = op->ob_refcnt - op->prev_refcnt;
-                //     curTimeObjHeat->temp.dec_diff = 0;
-                // } else {
-                //     curTimeObjHeat->temp.inc_diff = 0;
-                //     curTimeObjHeat->temp.dec_diff = op->prev_refcnt - op->ob_refcnt;
-                //     // fprintf(stderr, "cur count: %lu\t prev count:%lu\tresult: %lu\n", op->ob_refcnt, op->prev_refcnt, curTimeObjHeat->temp.dec_diff);
-                // }
-                // curTimeObjHeat->temp.inc_diff = 0;
-                // curTimeObjHeat->temp.dec_diff = 0;
                 curTimeObjHeat->temp.diff = op->ob_refcnt -  op->prev_refcnt;
                 curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);
+                char *tp_name_str = op->ob_type->tp_name;
+                curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
+                strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
+
                 curTimeObjHeat->op_ = op;
                 HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
                 cur_buff_count += 1;
-                // fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", oneColumnHeat->ts.tv_sec, oneColumnHeat->ts.tv_nsec, curTimeObjHeat->op_, curTimeObjHeat->temp.inc_diff, curTimeObjHeat->temp.dec_diff);
-                // fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", ts.tv_sec, ts.tv_nsec, curTimeObjHeat->op_, curTimeObjHeat->temp.inc_diff, curTimeObjHeat->temp.dec_diff);
-
-                // Py_ssize_t inc_diff = op->cur_inc_count - op->prev_inc_count;
-                // Py_ssize_t dec_diff = op->cur_dec_count - op->prev_dec_count;
-                // fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%d\t%d\n", ts.tv_sec, ts.tv_nsec, op, inc_diff, dec_diff);
-                // if (fflush(bookkeep_args->fd) != 0)
-                // {
-                //     fprintf(stderr, "Failed to flush data\n");
-                // }
             }
             PyGILState_Release(gstate);
             // unsigned int num_samples = HASH_COUNT(allHeats);
             if (cur_buff_count > buff_size)
             {
-                // int is_held = PyGILState_Check();
-                // if (is_held == 1)
-                // {
-                //     fprintf(stderr, "GIL is held here.\n");
-                // }
-                // else
-                // {
-                //     fprintf(stderr, "GIL is not held here.\n");
-                // }
                 fprintf(stderr, "buffer capacity reached, flushing...\n");
-                RefTrackHeatmapHash *outter_item,
-                    *tmp_outter;
-                CurTimeObjHeat *inner_item, *tmp_inner;
-                // flush and release the current hashmap elems
+                if (doIO_) {
+                    HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+                    {
+                        HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+                        {
+                            fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
+                                    outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
+                                    inner_item->op_, inner_item->temp.tp_name, 
+                                    inner_item->temp.sizeof_op,
+                                    inner_item->temp.diff);
+                            fflush(bookkeep_args->fd);
+                        }
+                    }
+                }
                 HASH_ITER(hh, allHeats, outter_item, tmp_outter)
                 {
                     HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
                     {
-                        if (doIO_) {
-                            fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
-                                    outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
-                                    inner_item->op_, inner_item->op_->ob_type->tp_name, 
-                                    inner_item->temp.sizeof_op,
-                                    inner_item->temp.diff);
-                        }
-                        // fprintf(bookkeep_args->fd, "%ld.%ld\t", outter_item->ts.tv_sec, outter_item->ts.tv_nsec);
-                        // fprintf(bookkeep_args->fd, "%p\t", inner_item->op_);
-                        // fprintf(bookkeep_args->fd, "%d\t%d\n", inner_item->temp.inc_diff, inner_item->temp.dec_diff);
                         HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+                        free(inner_item->temp.tp_name);
                         free(inner_item);
                     }
                     HASH_DEL(allHeats, outter_item);
@@ -2531,31 +2495,28 @@ extern "C"
                 cur_buff_count = 0;
             }
         }
-        // int is_held = PyGILState_Check();
-        // if (is_held == 1)
-        // {
-        //     fprintf(stderr, "GIL is held here.\n");
-        // }
-        // else
-        // {
-        //     fprintf(stderr, "GIL is not held here.\n");
-        // }
         fprintf(stderr, "flush the remaining...\n");
         fflush(stderr);
-        RefTrackHeatmapHash *outter_item, *tmp_outter;
-        CurTimeObjHeat *inner_item, *tmp_inner;
+        if (doIO_) {
+            HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+            {
+                HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+                {
+                    fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
+                            outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
+                            inner_item->op_, inner_item->temp.tp_name, 
+                            inner_item->temp.sizeof_op,
+                            inner_item->temp.diff);
+                    fflush(bookkeep_args->fd);
+                }
+            }
+        }
         HASH_ITER(hh, allHeats, outter_item, tmp_outter)
         {
             HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
             {
-                if (doIO_) {
-                    fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
-                            outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
-                            inner_item->op_, inner_item->op_->ob_type->tp_name, 
-                            inner_item->temp.sizeof_op,
-                            inner_item->temp.diff);
-                }
                 HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+                free(inner_item->temp.tp_name);
                 free(inner_item);
             }
             HASH_DEL(allHeats, outter_item);
@@ -2564,42 +2525,6 @@ extern "C"
         terminate_flag_dummy = 0;
         fprintf(stderr, "finish recording, shutdown\n");
     }
-    // void test_nested_hashtable()
-    // {
-    //     RefTrackHeatmapHash *item1, *tmp1;
-    //     CurTimeObjHeat *item2, *tmp2;
-    //     RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
-    //     oneColumnHeat->timestamp = time(NULL);
-    //     oneColumnHeat->curTimeObjHeat = NULL;
-    //     HASH_ADD_INT(allHeats, timestamp, oneColumnHeat);
-
-    //     PyObject *fakeOp;
-    //     CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-    //     curTimeObjHeat->op_ = fakeOp;
-    //     curTimeObjHeat->temp.inc_diff = 123;
-    //     curTimeObjHeat->temp.dec_diff = 4265;
-    //     HASH_ADD_PTR(allHeats->curTimeObjHeat, op, curTimeObjHeat);
-
-    //     HASH_ITER(hh, allHeats, item1, tmp1)
-    //     {
-    //         HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
-    //         {
-    //             printf("%ld\t%p\t%d\t%d\n", allHeats->timestamp, item2->op, item2->temp.inc_diff, item2->temp.dec_diff);
-    //         }
-    //     }
-
-    //     /* clean up both hash tables */
-    //     HASH_ITER(hh, allHeats, item1, tmp1)
-    //     {
-    //         HASH_ITER(hh, item1->curTimeObjHeat, item2, tmp2)
-    //         {
-    //             HASH_DEL(item1->curTimeObjHeat, item2);
-    //             free(item2);
-    //         }
-    //         HASH_DEL(allHeats, item1);
-    //         free(item1);
-    //     }
-    // }
 
 #ifdef __cplusplus
 }

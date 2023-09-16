@@ -160,6 +160,7 @@ whose size is determined when the object is allocated.
         // unsigned long inc_diff;
         // unsigned long dec_diff;
         long diff;
+        char *tp_name;
         size_t sizeof_op;
     } Temperature;
 
@@ -183,7 +184,7 @@ whose size is determined when the object is allocated.
         unsigned int sample_dur;
         FILE *fd;
         unsigned int buff_size;
-        PyObject *doIO;
+        unsigned int doIO;
     } BookkeepArgs;
     extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
@@ -448,12 +449,16 @@ given type object has a specified feature.
 
     PyAPI_FUNC(void) _Py_Dealloc(PyObject *);
 
+    
     static inline void _Py_INCREF(PyObject *op)
     {
 #ifdef Py_REF_DEBUG
         _Py_RefTotal++;
 #endif
         op->ob_refcnt++;
+        // usleep(1);
+        // struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 1};
+        // nanosleep(&sleep_time, NULL);
         // op->cur_inc_count++; // bookkeep refcnt inc
     }
 
@@ -465,6 +470,9 @@ given type object has a specified feature.
 #endif
         PyObject *op)
     {
+        // usleep(1);
+        // struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 1};
+        // nanosleep(&sleep_time, NULL);
 #ifdef Py_REF_DEBUG
         _Py_RefTotal--;
 #endif
