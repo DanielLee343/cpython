@@ -2790,6 +2790,7 @@ _PyBuiltin_Init(PyThreadState *tstate)
      * couldn't be diagnosed by examining sys.getobjects(0).
      */
 #define ADD_TO_ALL(OBJECT) _Py_AddToAllObjects((PyObject *)(OBJECT), 0)
+// #define ADD_TO_ALL(OBJECT) _Py_AddToAllObjects_hm((PyObject *)(OBJECT), 0)
 #else
 #define ADD_TO_ALL(OBJECT) (void)0
 #endif

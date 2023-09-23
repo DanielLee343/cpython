@@ -1079,6 +1079,7 @@ resize_compact(PyObject *unicode, Py_ssize_t length)
 #endif
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference(unicode);
+    // _Py_ForgetReference_hm(unicode);
 #endif
 
     new_unicode = (PyObject *)PyObject_REALLOC(unicode, new_size);

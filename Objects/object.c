@@ -17,7 +17,8 @@
 extern "C"
 {
 #endif
-
+volatile unsigned int total_num_objs = 0;
+PyObjHM *allPyObjHM = NULL;
     /* Defined in tracemalloc.c */
     extern void _PyMem_DumpTraceback(int fd, const void *ptr);
 
@@ -120,6 +121,49 @@ extern "C"
             op->_ob_prev = &refchain;
             refchain._ob_next->_ob_prev = op;
             refchain._ob_next = op;
+            total_num_objs++;
+            // /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
+            // PyObjHM *oneObjPtr;
+            // HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
+            // if(oneObjPtr == NULL) {
+            //     oneObjPtr = malloc(sizeof(*oneObjPtr));
+            //     oneObjPtr->op = op;
+            //     oneObjPtr->prev_refcnt = 0; // initilized as zero
+            //     HASH_ADD_PTR(allPyObjHM, op, oneObjPtr);
+            // }
+            // // else {
+            // //     fprintf(stderr, "exists, do not add\n");
+            // // }
+        }
+    }
+
+    void
+    _Py_AddToAllObjects_hm(PyObject *op, int force)
+    {
+#ifdef Py_DEBUG
+        if (!force)
+        {
+            /* If it's initialized memory, op must be in or out of
+             * the list unambiguously.
+             */
+            _PyObject_ASSERT(op, (op->_ob_prev == NULL) == (op->_ob_next == NULL));
+        }
+#endif
+        if (force || op->_ob_prev == NULL)
+        {
+            total_num_objs++;
+            /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
+            PyObjHM *oneObjPtr;
+            HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
+            if(oneObjPtr == NULL) {
+                oneObjPtr = malloc(sizeof(*oneObjPtr));
+                oneObjPtr->op = op;
+                oneObjPtr->prev_refcnt = 0; // initilized as zero
+                HASH_ADD_PTR(allPyObjHM, op, oneObjPtr);
+            }
+            // else {
+            //     fprintf(stderr, "exists, do not add\n");
+            // }
         }
     }
 #endif /* Py_TRACE_REFS */
@@ -1954,6 +1998,7 @@ extern "C"
         Py_SET_REFCNT(op, 1);
 #ifdef Py_TRACE_REFS
         _Py_AddToAllObjects(op, 1);
+        // _Py_AddToAllObjects_hm(op, 1);
 #endif
     }
 
@@ -1992,6 +2037,32 @@ extern "C"
         op->_ob_next->_ob_prev = op->_ob_prev;
         op->_ob_prev->_ob_next = op->_ob_next;
         op->_ob_next = op->_ob_prev = NULL;
+        total_num_objs--;
+        /*my own hashmap for pyobj addr, may not subject to GIL*/
+        // PyObjHM *findObj;
+        // HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
+        // if (findObj) {
+        //     HASH_DEL(allPyObjHM, findObj);
+        //     free(findObj);
+        // }
+    }
+
+     void
+    _Py_ForgetReference_hm(PyObject *op)
+    {
+        if (Py_REFCNT(op) < 0)
+        {
+            _PyObject_ASSERT_FAILED_MSG(op, "negative refcnt");
+        }
+
+        total_num_objs--;
+        /*my own hashmap for pyobj addr, may not subject to GIL*/
+        PyObjHM *findObj;
+        HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
+        if (findObj) {
+            HASH_DEL(allPyObjHM, findObj);
+            free(findObj);
+        }
     }
 
     /* Print all live objects.  Because PyObject_Print is called, the
@@ -2347,6 +2418,7 @@ extern "C"
         destructor dealloc = Py_TYPE(op)->tp_dealloc;
 #ifdef Py_TRACE_REFS
         _Py_ForgetReference(op);
+        // _Py_ForgetReference_hm(op);
 #endif
         (*dealloc)(op);
     }
@@ -2390,8 +2462,7 @@ extern "C"
     // }
     void *test_thread_func(void *arg)
     {
-        PyGILState_STATE gstate;
-        gstate = PyGILState_Ensure();
+        PyGILState_STATE gstate = PyGILState_Ensure();
         // FILE *out_fd = fopen("/home/lyuze/cpython/heats.txt", "w");
         FILE *out_fd = (FILE *)(arg);
         fprintf(stderr, "start bookkeeping thread\n");
@@ -2415,6 +2486,7 @@ extern "C"
         BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
         unsigned int cur_buff_count;
         unsigned int buff_size = bookkeep_args->buff_size;
+        double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
         fprintf(stderr, "buff_size is %d\n", buff_size);
         if (buff_size == 0)
         {
@@ -2436,37 +2508,81 @@ extern "C"
         while (!terminate_flag_dummy)
         {
             PyGILState_STATE gstate = PyGILState_Ensure();
+            PyObjHM *cur_pyobj, *cur_pyobj_tmp;
             PyObject *op;
-            for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
+            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
             {
-                op->prev_refcnt = op->ob_refcnt;
+            //     Py_ssize_t dummy = cur_pyobj->op->ob_refcnt;
+                // fprintf(bookkeep_args->fd, "%zu ", cur_pyobj->op->ob_refcnt);
+                // fprintf(bookkeep_args->fd, "%ld\t%zu\n"
+                //                     ,(unsigned long)cur_pyobj->op
+                //                     , cur_pyobj->op->ob_refcnt
+                //                     );
+                // void *current_heap_end = sbrk(0);
+                // fprintf(bookkeep_args->fd, "Current heap end address: %p\n", current_heap_end);
+                // fflush(bookkeep_args->fd);
+                // cur_pyobj->op->prev_refcnt = cur_pyobj->op->ob_refcnt;
+                cur_pyobj->prev_refcnt = cur_pyobj->op->ob_refcnt;
+                // op->prev_refcnt = op->ob_refcnt;
             }
-            Py_BEGIN_ALLOW_THREADS
+            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            {
+                // Py_ssize_t dummy = op->ob_refcnt;
+                // fprintf(bookkeep_args->fd, "%zu ", op->ob_refcnt);
+                // fflush(bookkeep_args->fd);
+                // op->prev_refcnt = op->ob_refcnt;
+            }
+            PyGILState_Release(gstate);
+            // Py_BEGIN_ALLOW_THREADS
                 usleep(bookkeep_args->sample_dur);
-            Py_END_ALLOW_THREADS
+            // Py_END_ALLOW_THREADS
             RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
             clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
             oneColumnHeat->curTimeObjHeat = NULL;
             HASH_ADD_INT(allHeats, ts, oneColumnHeat);
 
-            for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
+            unsigned int cur_obj_cnt = 0;
+            double num_I_want_to_count_db = percent_I_want_to_cnt * (double)total_num_objs;
+            unsigned int rounded_num_I_want_to_count = (unsigned int)ceil(num_I_want_to_count_db);
+            fprintf(stderr, "# objs I want to cnt: %u\n", rounded_num_I_want_to_count);
+            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
             {
+                // if(cur_pyobj->op != NULL) {
                 CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                curTimeObjHeat->temp.diff = op->ob_refcnt -  op->prev_refcnt;
-                curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);
-                char *tp_name_str = op->ob_type->tp_name;
+                // Py_ssize_t dummy1 = cur_pyobj->op->ob_refcnt;
+                // Py_ssize_t dummy2 = cur_pyobj->prev_refcnt;
+                curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
+                // curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
+                // curTimeObjHeat->temp.diff = op->ob_refcnt -  op->prev_refcnt;
+                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(cur_pyobj->op); // must hold GIL
+                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);
+                // curTimeObjHeat->temp.sizeof_op = 0;
+                char *tp_name_str;
+                if (cur_pyobj->op->ob_type) {
+                    tp_name_str = cur_pyobj->op->ob_type->tp_name;
+                    // tp_name_str = op->ob_type->tp_name;
+                } else {
+                    tp_name_str = "type_dealloced";
+                }
                 curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
                 strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
 
-                curTimeObjHeat->op_ = op;
+                curTimeObjHeat->op_ = cur_pyobj->op;
+                // curTimeObjHeat->op_ = op;
                 HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
                 cur_buff_count += 1;
+                if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
+                    break;
+                }
+                // }
             }
-            PyGILState_Release(gstate);
+            // PyGILState_Release(gstate);
             // unsigned int num_samples = HASH_COUNT(allHeats);
             if (cur_buff_count > buff_size)
             {
-                fprintf(stderr, "buffer capacity reached, flushing...\n");
+                fprintf(stderr, "cur_num_objs: %ld\n", total_num_objs);
                 if (doIO_) {
                     HASH_ITER(hh, allHeats, outter_item, tmp_outter)
                     {
@@ -2495,8 +2611,8 @@ extern "C"
                 cur_buff_count = 0;
             }
         }
-        fprintf(stderr, "flush the remaining...\n");
-        fflush(stderr);
+        // fprintf(stderr, "flush the remaining...\n");
+        // fflush(stderr);
         if (doIO_) {
             HASH_ITER(hh, allHeats, outter_item, tmp_outter)
             {
@@ -2523,7 +2639,7 @@ extern "C"
             free(outter_item);
         }
         terminate_flag_dummy = 0;
-        fprintf(stderr, "finish recording, shutdown\n");
+        fprintf(stderr, "finish bookkeeping, shutdown\n");
     }
 
 #ifdef __cplusplus

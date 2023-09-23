@@ -69,10 +69,10 @@ whose size is determined when the object is allocated.
 /* Define pointers to support a doubly-linked list of all live heap objects. */
 #define _PyObject_HEAD_EXTRA  \
     struct _object *_ob_next; \
-    struct _object *_ob_prev; \
-    Py_ssize_t prev_refcnt;
+    struct _object *_ob_prev;
+    // Py_ssize_t prev_refcnt;
 
-#define _PyObject_EXTRA_INIT 0, 0, 0,
+#define _PyObject_EXTRA_INIT 0, 0,
 
 #else
 #define _PyObject_HEAD_EXTRA
@@ -105,15 +105,14 @@ whose size is determined when the object is allocated.
     typedef struct _object
     {
         _PyObject_HEAD_EXTRA
-            Py_ssize_t ob_refcnt;
+            volatile Py_ssize_t ob_refcnt;
         PyTypeObject *ob_type;
-        // Py_ssize_t prev_refcnt;
         // Py_ssize_t cur_inc_count; // same with ob_refcnt, but keeps increasing
         // Py_ssize_t prev_inc_count;
         // Py_ssize_t cur_dec_count; // keeps increasing when decref is called
         // Py_ssize_t prev_dec_count;
     } PyObject;
-
+    
 /* Cast argument to PyObject* type. */
 #define _PyObject_CAST(op) ((PyObject *)(op))
 #define _PyObject_CAST_CONST(op) ((const PyObject *)(op))
@@ -174,7 +173,6 @@ whose size is determined when the object is allocated.
 
     typedef struct
     {
-        // time_t timestamp;               // key
         struct timespec ts;             // key
         CurTimeObjHeat *curTimeObjHeat; // value
         UT_hash_handle hh;
@@ -185,14 +183,25 @@ whose size is determined when the object is allocated.
         FILE *fd;
         unsigned int buff_size;
         unsigned int doIO;
+        unsigned int percent_I_want_to_cnt;
     } BookkeepArgs;
+    typedef struct
+    {
+        PyObject *op; /* key */
+        volatile Py_ssize_t prev_refcnt;
+        // Py_ssize_t dummy_value; /* value */
+        UT_hash_handle hh;
+    } PyObjHM;
+    extern PyObjHM *allPyObjHM;
     extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
     extern volatile short terminate_flag_dummy;
+    extern volatile unsigned int total_num_objs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
     PyAPI_FUNC(void *) test_thread_func(void *arg);
     PyAPI_DATA(volatile short) terminate_flag_dummy;
+    PyAPI_DATA(volatile unsigned int) total_num_objs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
     // CurTimeObjHeat *curTimeObjHeat = NULL;
     /*
@@ -470,9 +479,6 @@ given type object has a specified feature.
 #endif
         PyObject *op)
     {
-        // usleep(1);
-        // struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 1};
-        // nanosleep(&sleep_time, NULL);
 #ifdef Py_REF_DEBUG
         _Py_RefTotal--;
 #endif
@@ -488,6 +494,9 @@ given type object has a specified feature.
         }
         else
         {
+            // usleep(1);
+            // struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 10};
+            // nanosleep(&sleep_time, NULL);
             _Py_Dealloc(op);
         }
     }

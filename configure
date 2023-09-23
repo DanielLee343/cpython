@@ -6447,6 +6447,28 @@ $as_echo "#define Py_TRACE_REFS 1" >>confdefs.h
 
 fi
 
+# Check for --with-trace-refs-hm
+# --with-trace-refs-hm
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for --with-trace-refs-hm" >&5
+$as_echo_n "checking for --with-trace-refs-hm... " >&6; }
+
+# Check whether --with-trace-refs was given.
+if test "${with_trace_refs_hm+set}" = set; then :
+  withval=$with_trace_refs_hm;
+else
+  with_trace_refs_hm=no
+fi
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $with_trace_refs_hm" >&5
+$as_echo "$with_trace_refs_hm" >&6; }
+
+if test "$with_trace_refs_hm" = "yes"
+then
+
+$as_echo "#define Py_TRACE_REFS_HM 1" >>confdefs.h
+
+fi
+
 # Check for --with-assertions.
 # This allows enabling assertions without Py_DEBUG.
 assertions='false'

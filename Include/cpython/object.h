@@ -11,6 +11,7 @@ PyAPI_FUNC(void) _Py_NewReference(PyObject *op);
 #ifdef Py_TRACE_REFS
 /* Py_TRACE_REFS is such major surgery that we call external routines. */
 PyAPI_FUNC(void) _Py_ForgetReference(PyObject *);
+// PyAPI_FUNC(void) _Py_ForgetReference_hm(PyObject *);
 #endif
 
 /* Update the Python traceback of an object. This function must be called
