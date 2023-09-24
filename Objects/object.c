@@ -18,7 +18,9 @@ extern "C"
 {
 #endif
 volatile unsigned int total_num_objs = 0;
+// #ifdef Py_TRACE_REFS_HM
 PyObjHM *allPyObjHM = NULL;
+// #endif
     /* Defined in tracemalloc.c */
     extern void _PyMem_DumpTraceback(int fd, const void *ptr);
 
@@ -137,35 +139,6 @@ PyObjHM *allPyObjHM = NULL;
         }
     }
 
-    void
-    _Py_AddToAllObjects_hm(PyObject *op, int force)
-    {
-#ifdef Py_DEBUG
-        if (!force)
-        {
-            /* If it's initialized memory, op must be in or out of
-             * the list unambiguously.
-             */
-            _PyObject_ASSERT(op, (op->_ob_prev == NULL) == (op->_ob_next == NULL));
-        }
-#endif
-        if (force || op->_ob_prev == NULL)
-        {
-            total_num_objs++;
-            /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
-            PyObjHM *oneObjPtr;
-            HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
-            if(oneObjPtr == NULL) {
-                oneObjPtr = malloc(sizeof(*oneObjPtr));
-                oneObjPtr->op = op;
-                oneObjPtr->prev_refcnt = 0; // initilized as zero
-                HASH_ADD_PTR(allPyObjHM, op, oneObjPtr);
-            }
-            // else {
-            //     fprintf(stderr, "exists, do not add\n");
-            // }
-        }
-    }
 #endif /* Py_TRACE_REFS */
 
 #ifdef Py_REF_DEBUG
@@ -411,7 +384,7 @@ PyObjHM *allPyObjHM = NULL;
         {
             return 1;
         }
-#endif
+#endif /*Py_TRACE_REFS*/
         return 0;
     }
 
@@ -1998,7 +1971,9 @@ PyObjHM *allPyObjHM = NULL;
         Py_SET_REFCNT(op, 1);
 #ifdef Py_TRACE_REFS
         _Py_AddToAllObjects(op, 1);
-        // _Py_AddToAllObjects_hm(op, 1);
+#endif
+#ifdef Py_TRACE_REFS_HM
+        _Py_AddToAllObjects_hm(op, 1);
 #endif
     }
 
@@ -2032,7 +2007,7 @@ PyObjHM *allPyObjHM = NULL;
             _PyObject_ASSERT_FAILED_MSG(op,
                                         "object not found in the objects list");
         }
-#endif
+#endif /*Py_TRACE_REFS*/
 
         op->_ob_next->_ob_prev = op->_ob_prev;
         op->_ob_prev->_ob_next = op->_ob_next;
@@ -2045,24 +2020,6 @@ PyObjHM *allPyObjHM = NULL;
         //     HASH_DEL(allPyObjHM, findObj);
         //     free(findObj);
         // }
-    }
-
-     void
-    _Py_ForgetReference_hm(PyObject *op)
-    {
-        if (Py_REFCNT(op) < 0)
-        {
-            _PyObject_ASSERT_FAILED_MSG(op, "negative refcnt");
-        }
-
-        total_num_objs--;
-        /*my own hashmap for pyobj addr, may not subject to GIL*/
-        PyObjHM *findObj;
-        HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
-        if (findObj) {
-            HASH_DEL(allPyObjHM, findObj);
-            free(findObj);
-        }
     }
 
     /* Print all live objects.  Because PyObject_Print is called, the
@@ -2129,6 +2086,52 @@ PyObjHM *allPyObjHM = NULL;
 
 #endif
 
+#ifdef Py_TRACE_REFS_HM
+    void _Py_ForgetReference_hm(PyObject *op)
+    {
+        if (Py_REFCNT(op) < 0)
+        {
+            _PyObject_ASSERT_FAILED_MSG(op, "negative refcnt");
+        }
+
+        total_num_objs--;
+        /*my own hashmap for pyobj addr, may not subject to GIL*/
+        PyObjHM *findObj;
+        HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
+        if (findObj) {
+            HASH_DEL(allPyObjHM, findObj);
+            free(findObj);
+        }
+    }
+    void _Py_AddToAllObjects_hm(PyObject *op, int force)
+    {
+#ifdef Py_DEBUG
+        if (!force)
+        {
+            /* If it's initialized memory, op must be in or out of
+             * the list unambiguously.
+             */
+            _PyObject_ASSERT(op, (op->_ob_prev == NULL) == (op->_ob_next == NULL));
+        }
+#endif
+        if (force)
+        {
+            total_num_objs++;
+            /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
+            PyObjHM *oneObjPtr;
+            // HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
+            // if(oneObjPtr == NULL) {
+                oneObjPtr = malloc(sizeof(*oneObjPtr));
+                oneObjPtr->op = op;
+                oneObjPtr->prev_refcnt = 0; // initilized as zero
+                HASH_ADD_PTR(allPyObjHM, op, oneObjPtr);
+            // }
+            // else {
+            //     fprintf(stderr, "exists, do not add\n");
+            // }
+        }
+    }
+#endif /* Py_TRACE_REFS_HM */
     /* Hack to force loading of abstract.o */
     Py_ssize_t (*_Py_abstract_hack)(PyObject *) = PyObject_Size;
 
@@ -2418,7 +2421,9 @@ PyObjHM *allPyObjHM = NULL;
         destructor dealloc = Py_TYPE(op)->tp_dealloc;
 #ifdef Py_TRACE_REFS
         _Py_ForgetReference(op);
-        // _Py_ForgetReference_hm(op);
+#endif
+#ifdef Py_TRACE_REFS_HM 
+        _Py_ForgetReference_hm(op);
 #endif
         (*dealloc)(op);
     }

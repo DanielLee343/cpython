@@ -5424,7 +5424,9 @@ PyType_Ready(PyTypeObject *type)
      * Still, not all type objects go through PyType_Ready.
      */
     _Py_AddToAllObjects((PyObject *)type, 0);
-    // _Py_AddToAllObjects_hm((PyObject *)type, 0);
+#endif
+#ifdef Py_TRACE_REFS_HM
+    _Py_AddToAllObjects_hm((PyObject *)type, 0);
 #endif
 
     if (type->tp_name == NULL) {

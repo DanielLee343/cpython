@@ -394,9 +394,9 @@ PyStructSequence_InitType2(PyTypeObject *type, PyStructSequence_Desc *desc)
     if (type->ob_base.ob_base._ob_next) {
         _Py_ForgetReference((PyObject *)type);
     }
-    // if (type->ob_base.ob_base._ob_next) {
-    //     _Py_ForgetReference_hm((PyObject *)type);
-    // }
+#endif
+#ifdef Py_TRACE_REFS_HM 
+    _Py_ForgetReference_hm((PyObject *)type); /* any bug??? */
 #endif
 
     /* PyTypeObject has already been initialized */

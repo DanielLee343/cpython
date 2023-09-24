@@ -89,11 +89,14 @@ extern "C"
 
 #ifdef Py_TRACE_REFS
     extern void _Py_AddToAllObjects(PyObject *op, int force);
-    // extern void _Py_AddToAllObjects_hm(PyObject *op, int force);
     // extern void _Py_PrintReferences(FILE *);
     PyAPI_FUNC(void) _Py_PrintReferences(FILE *);
     // extern void _Py_PrintReferenceAddresses(FILE *);
     PyAPI_FUNC(void) _Py_PrintReferenceAddresses(FILE *);
+#endif
+
+#ifdef Py_TRACE_REFS_HM
+    extern void _Py_AddToAllObjects_hm(PyObject *op, int force);
 #endif
 
     static inline PyObject **

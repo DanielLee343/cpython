@@ -79,6 +79,10 @@ tuple_alloc(Py_ssize_t size)
         Py_SIZE(op) = size;
         Py_TYPE(op) = &PyTuple_Type;
 #endif
+#ifdef Py_TRACE_REFS_HM
+        Py_SIZE(op) = size;
+        Py_TYPE(op) = &PyTuple_Type;
+#endif
         _Py_NewReference((PyObject *)op);
     }
     else
@@ -936,7 +940,9 @@ _PyTuple_Resize(PyObject **pv, Py_ssize_t newsize)
     }
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference((PyObject *) v);
-    // _Py_ForgetReference_hm((PyObject *) v);
+#endif
+#ifdef Py_TRACE_REFS_HM
+    _Py_ForgetReference_hm((PyObject *) v);
 #endif
     /* DECREF items deleted by shrinkage */
     for (i = newsize; i < oldsize; i++) {

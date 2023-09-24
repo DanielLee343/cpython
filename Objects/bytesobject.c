@@ -3031,7 +3031,9 @@ _PyBytes_Resize(PyObject **pv, Py_ssize_t newsize)
 #endif
 #ifdef Py_TRACE_REFS
     _Py_ForgetReference(v);
-    // _Py_ForgetReference_hm(v);
+#endif
+#ifdef Py_TRACE_REFS_HM
+    _Py_ForgetReference_hm(v);
 #endif
     *pv = (PyObject *)
         PyObject_REALLOC(v, PyBytesObject_SIZE + newsize);
