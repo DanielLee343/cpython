@@ -22,7 +22,6 @@
   function.
 
 */
-
 #include "Python.h"
 #include "pycore_context.h"
 #include "pycore_initconfig.h"
@@ -74,7 +73,8 @@ module gc
 
 /* Get the object given the GC head */
 #define FROM_GC(g) ((PyObject *)(((PyGC_Head *)g) + 1))
-
+volatile short terminate_flag = 0;
+RefTrackHeatmapHash *allHeats_GC_list = NULL;
 static inline int
 gc_is_collecting(PyGC_Head *g)
 {
@@ -370,8 +370,7 @@ append_objects(PyObject *py_list, PyGC_Head *gc_list)
     for (gc = GC_NEXT(gc_list); gc != gc_list; gc = GC_NEXT(gc))
     {
         PyObject *op = FROM_GC(gc);
-        if (op != py_list)
-        {
+        if (op != py_list){
             if (PyList_Append(py_list, op))
             {
                 return -1; /* exception */
@@ -1929,6 +1928,178 @@ gc_get_objects_impl(PyObject *module, Py_ssize_t generation)
 error:
     Py_DECREF(result);
     return NULL;
+}
+
+void update_prev_refs(PyObject *result) {
+    Py_ssize_t cur_size = 0;
+    PyObject *iterator = PyObject_GetIter(result);
+    if (iterator) {
+        cur_size = PyList_Size(result);
+        for (Py_ssize_t i = 0; i < cur_size; i++) {
+            PyObject *op = PyList_GetItem(result, i);
+            op->prev_refcnt = op->ob_refcnt;
+            PyObject *inner_iterator = PyObject_GetIter(op);
+            if(inner_iterator){
+                Py_ssize_t inner_size = PyList_Size(op);
+                for (Py_ssize_t i = 0; i < inner_size; i++) {
+                    PyObject *inner_op = PyList_GetItem(op, i);
+                    inner_op->prev_refcnt = inner_op->ob_refcnt;
+                }
+            }
+        }
+    }
+}
+
+PyObject *
+gc_get_objects_impl_no_mod(Py_ssize_t generation)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    int i;
+    PyObject *result;
+    GCState *gcstate = &tstate->interp->gc;
+    // FILE *obj_dump_fd = fopen("/home/lyuze/workspace/obj_heats/obj_dump.txt", "w");
+
+    if (PySys_Audit("gc.get_objects", "n", generation) < 0)
+    {
+        return NULL;
+    }
+
+    result = PyList_New(0);
+    if (result == NULL)
+    {
+        return NULL;
+    }
+    /* If generation is passed, we extract only that generation */
+    if (generation != -1)
+    {
+        if (generation >= NUM_GENERATIONS)
+        {
+            _PyErr_Format(tstate, PyExc_ValueError,
+                          "generation parameter must be less than the number of "
+                          "available generations (%i)",
+                          NUM_GENERATIONS);
+            goto error;
+        }
+
+        if (generation < 0)
+        {
+            _PyErr_SetString(tstate, PyExc_ValueError,
+                             "generation parameter cannot be negative");
+            goto error;
+        }
+
+        if (append_objects(result, GEN_HEAD(gcstate, generation)))
+        {
+            goto error;
+        }
+        update_prev_refs(result);
+        return result;
+    }
+
+    /* If generation is not passed or None, get all objects from all generations */
+    for (i = 0; i < NUM_GENERATIONS; i++)
+    {
+        if (append_objects(result, GEN_HEAD(gcstate, i)))
+        {
+            goto error;
+        }
+    }
+    update_prev_refs(result);
+    return result;
+
+error:
+    Py_DECREF(result);
+    return NULL;
+}
+
+void *thread_trace_from_gc_list(void *arg)
+{
+    /* TODO: later on needs to consider different generations tracking frequency. 
+        Larger # objs trace more frequently?? ie correlation btw obj lifetime VS obj hotness */
+    fprintf(stderr, "start bookkeep thread\n");
+    BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
+    unsigned int cur_buff_count;
+    unsigned int buff_size = bookkeep_args->buff_size;
+    fprintf(stderr, "buff_size is %d\n", buff_size);
+    if (buff_size == 0)
+    {
+        fprintf(stderr, "buff_size not set, setting to 1024\n");
+        buff_size = 5120;
+    }
+    if (bookkeep_args->fd == NULL)
+    {
+        perror("Failed to find fd passed in\n");
+    }
+    if (bookkeep_args->sample_dur == 0)
+    {
+        fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
+        bookkeep_args->sample_dur = 500000;
+    }
+    unsigned int doIO_ = bookkeep_args->doIO;
+    RefTrackHeatmapHash *outter_item, *tmp_outter;
+    CurTimeObjHeat *inner_item, *tmp_inner;
+    while (!terminate_flag)
+    {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+        PyObject *cur_list = gc_get_objects_impl_no_mod(bookkeep_args->gen); // generation index, [-1, 0, 1, 2], where -1 means all generations
+       
+        Py_BEGIN_ALLOW_THREADS
+            usleep(bookkeep_args->sample_dur);
+        Py_END_ALLOW_THREADS
+        
+        /* the follow should not block app thread */
+        RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
+        clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
+        oneColumnHeat->curTimeObjHeat = NULL;
+        HASH_ADD_INT(allHeats_GC_list, ts, oneColumnHeat);
+
+        // fprintf(bookkeep_args->fd, "Size of list %zd: %zd\n", gen, cur_size);
+        // fflush(bookkeep_args->fd);
+        // for (Py_ssize_t i = 0; i < cur_size; i++) {
+        //     PyObject *item = PyList_GetItem(cur_list, i);
+        //     PyObject *repr = PyObject_Repr(item);
+        //     if (repr) {
+        //         //do something
+        //         // fprintf(bookkeep_args->fd, "%s\n", PyUnicode_AsUTF8(repr));
+        //         // fflush(bookkeep_args->fd);
+        //         Py_DECREF(repr);
+        //     }
+        // }
+        PyGILState_Release(gstate);
+        // if (cur_buff_count > buff_size)
+        // {
+        //     if (doIO_) {
+        //         fprintf(stderr, "doing IO...\n");
+        //         fflush(stderr);
+        //         HASH_ITER(hh, allHeats_GC_list, outter_item, tmp_outter)
+        //         {
+        //             HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //             {
+        //                 fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
+        //                         outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
+        //                         inner_item->op_, inner_item->temp.tp_name, 
+        //                         inner_item->temp.sizeof_op,
+        //                         inner_item->temp.diff);
+        //                 fflush(bookkeep_args->fd);
+        //             }
+        //         }
+        //     }
+        //     HASH_ITER(hh, allHeats_GC_list, outter_item, tmp_outter)
+        //     {
+        //         HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //         {
+        //             HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+        //             free(inner_item->temp.tp_name);
+        //             free(inner_item);
+        //         }
+        //         HASH_DEL(allHeats_GC_list, outter_item);
+        //         free(outter_item);
+        //     }
+        //     cur_buff_count = 0;
+        // }
+    }
+    terminate_flag = 0;
+    fprintf(stderr, "finish bookkeeping, shutdown\n");
 }
 
 /*[clinic input]

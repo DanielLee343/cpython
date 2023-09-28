@@ -17,7 +17,7 @@
 extern "C"
 {
 #endif
-volatile unsigned int total_num_objs = 0;
+// volatile unsigned int total_num_objs = 0;
 // #ifdef Py_TRACE_REFS_HM
 PyObjHM *allPyObjHM = NULL;
 // #endif
@@ -123,7 +123,7 @@ PyObjHM *allPyObjHM = NULL;
             op->_ob_prev = &refchain;
             refchain._ob_next->_ob_prev = op;
             refchain._ob_next = op;
-            total_num_objs++;
+            // total_num_objs++;
             // /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
             // PyObjHM *oneObjPtr;
             // HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
@@ -2012,7 +2012,7 @@ PyObjHM *allPyObjHM = NULL;
         op->_ob_next->_ob_prev = op->_ob_prev;
         op->_ob_prev->_ob_next = op->_ob_next;
         op->_ob_next = op->_ob_prev = NULL;
-        total_num_objs--;
+        // total_num_objs--;
         /*my own hashmap for pyobj addr, may not subject to GIL*/
         // PyObjHM *findObj;
         // HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
@@ -2094,7 +2094,7 @@ PyObjHM *allPyObjHM = NULL;
             _PyObject_ASSERT_FAILED_MSG(op, "negative refcnt");
         }
 
-        total_num_objs--;
+        // total_num_objs--;
         /*my own hashmap for pyobj addr, may not subject to GIL*/
         PyObjHM *findObj;
         HASH_FIND_PTR(allPyObjHM, &op, findObj);  /* s: output pointer */
@@ -2116,7 +2116,7 @@ PyObjHM *allPyObjHM = NULL;
 #endif
         if (force)
         {
-            total_num_objs++;
+            // total_num_objs++;
             /* my own hashmap for all live objs, to avoid GIL (maybe? But traversal overhead ≈ DLL??) */
             PyObjHM *oneObjPtr;
             // HASH_FIND_PTR(allPyObjHM, &op, oneObjPtr);
@@ -2440,31 +2440,6 @@ PyObjHM *allPyObjHM = NULL;
     volatile short terminate_flag_dummy = 0;
     RefTrackHeatmapHash *allHeats = NULL;
     unsigned int SAMPLE_DUR; // sample duration, default 0.5 s
-    // Function that each thread will execute
-    // void *thread_function(void *arg)
-    // {
-    //     // int thread_id = *((int *)arg);
-    //     fprintf(stderr, "Thread is running...\n");
-    //     FILE *output_fd = fopen("heats.txt", "w");
-    //     if (output_fd == NULL)
-    //     {
-    //         // perror("Failed to open file");
-    //         fprintf(stderr, "Failed to open file\n");
-    //     }
-    //     while (!terminate_flag)
-    //     {
-    //         fprintf(output_fd, "Thread whatever is running\n");
-    //         if (fflush(output_fd) != 0)
-    //         {
-    //             perror("Failed to flush data");
-    //         }
-    //         usleep(100000);
-    //     }
-    //     fclose(output_fd);
-    //     fprintf(stderr, "finish testing thread\n");
-    //     terminate_flag = 0; // before exit, reset terminate flag
-    //     return NULL;
-    // }
     void *test_thread_func(void *arg)
     {
         PyGILState_STATE gstate = PyGILState_Ensure();
@@ -2491,7 +2466,7 @@ PyObjHM *allPyObjHM = NULL;
         BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
         unsigned int cur_buff_count;
         unsigned int buff_size = bookkeep_args->buff_size;
-        double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
+        // double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
         fprintf(stderr, "buff_size is %d\n", buff_size);
         if (buff_size == 0)
         {
@@ -2515,7 +2490,14 @@ PyObjHM *allPyObjHM = NULL;
             PyGILState_STATE gstate = PyGILState_Ensure();
             PyObjHM *cur_pyobj, *cur_pyobj_tmp;
             PyObject *op;
-            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            #ifdef Py_TRACE_REFS
+            for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            {
+                op->prev_refcnt = op->ob_refcnt;
+                PyObject *iterator = PyObject_GetIter(op);
+            }
+            #endif
+            #ifdef Py_TRACE_REFS_HM
             HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
             {
             //     Py_ssize_t dummy = cur_pyobj->op->ob_refcnt;
@@ -2524,20 +2506,9 @@ PyObjHM *allPyObjHM = NULL;
                 //                     ,(unsigned long)cur_pyobj->op
                 //                     , cur_pyobj->op->ob_refcnt
                 //                     );
-                // void *current_heap_end = sbrk(0);
-                // fprintf(bookkeep_args->fd, "Current heap end address: %p\n", current_heap_end);
-                // fflush(bookkeep_args->fd);
-                // cur_pyobj->op->prev_refcnt = cur_pyobj->op->ob_refcnt;
                 cur_pyobj->prev_refcnt = cur_pyobj->op->ob_refcnt;
-                // op->prev_refcnt = op->ob_refcnt;
             }
-            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
-            {
-                // Py_ssize_t dummy = op->ob_refcnt;
-                // fprintf(bookkeep_args->fd, "%zu ", op->ob_refcnt);
-                // fflush(bookkeep_args->fd);
-                // op->prev_refcnt = op->ob_refcnt;
-            }
+            #endif
             PyGILState_Release(gstate);
             // Py_BEGIN_ALLOW_THREADS
                 usleep(bookkeep_args->sample_dur);
@@ -2547,27 +2518,21 @@ PyObjHM *allPyObjHM = NULL;
             oneColumnHeat->curTimeObjHeat = NULL;
             HASH_ADD_INT(allHeats, ts, oneColumnHeat);
 
-            unsigned int cur_obj_cnt = 0;
-            double num_I_want_to_count_db = percent_I_want_to_cnt * (double)total_num_objs;
-            unsigned int rounded_num_I_want_to_count = (unsigned int)ceil(num_I_want_to_count_db);
-            fprintf(stderr, "# objs I want to cnt: %u\n", rounded_num_I_want_to_count);
-            // for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+            // unsigned int cur_obj_cnt = 0;
+            // double num_I_want_to_count_db = percent_I_want_to_cnt * (double)total_num_objs;
+            // unsigned int rounded_num_I_want_to_count = (unsigned int)ceil(num_I_want_to_count_db);
+            // fprintf(stderr, "# objs I want to cnt: %u\n", rounded_num_I_want_to_count);
+            
+            #ifdef Py_TRACE_REFS_HM
             HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
             {
-                // if(cur_pyobj->op != NULL) {
                 CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                // Py_ssize_t dummy1 = cur_pyobj->op->ob_refcnt;
-                // Py_ssize_t dummy2 = cur_pyobj->prev_refcnt;
                 curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
-                // curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
-                // curTimeObjHeat->temp.diff = op->ob_refcnt -  op->prev_refcnt;
                 // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(cur_pyobj->op); // must hold GIL
-                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);
-                // curTimeObjHeat->temp.sizeof_op = 0;
+                curTimeObjHeat->temp.sizeof_op = 0;
                 char *tp_name_str;
                 if (cur_pyobj->op->ob_type) {
                     tp_name_str = cur_pyobj->op->ob_type->tp_name;
-                    // tp_name_str = op->ob_type->tp_name;
                 } else {
                     tp_name_str = "type_dealloced";
                 }
@@ -2575,20 +2540,43 @@ PyObjHM *allPyObjHM = NULL;
                 strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
 
                 curTimeObjHeat->op_ = cur_pyobj->op;
-                // curTimeObjHeat->op_ = op;
                 HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
                 cur_buff_count += 1;
-                if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
-                    break;
-                }
+                // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
+                //     break;
                 // }
             }
+            #endif
+            #ifdef Py_TRACE_REFS
+            // in this case the prev_cnt is stored in PyObject, not in PyObjHM
+            for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next) {
+                CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
+                curTimeObjHeat->temp.diff = op->ob_refcnt - op->prev_refcnt;
+                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);  // must hold GIL
+                curTimeObjHeat->temp.sizeof_op = 0;
+                char *tp_name_str;
+                if (op->ob_type) {
+                    tp_name_str = op->ob_type->tp_name;
+                } else {
+                    tp_name_str = "type_dealloced";
+                }
+                curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
+                strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
+                curTimeObjHeat->op_ = op;
+                HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
+                cur_buff_count += 1;
+                // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
+                //     break;
+                // }
+            }
+            #endif
             // PyGILState_Release(gstate);
             // unsigned int num_samples = HASH_COUNT(allHeats);
             if (cur_buff_count > buff_size)
             {
-                fprintf(stderr, "cur_num_objs: %ld\n", total_num_objs);
                 if (doIO_) {
+                    fprintf(stderr, "doing IO...\n");
+                    fflush(stderr);
                     HASH_ITER(hh, allHeats, outter_item, tmp_outter)
                     {
                         HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)

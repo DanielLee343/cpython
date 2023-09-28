@@ -582,19 +582,6 @@ extern "C"
         int res = PyRun_AnyFileFlags(stdin, "<stdin>", cf);
         *exitcode = (res != 0);
     }
-    // volatile short terminate_flag_dummy = 0;
-    // void *test_thread_func(void *arg)
-    // {
-    //     FILE *out_fd = (FILE *)(arg);
-    //     fprintf(stderr, "start test thread\n");
-    //     while (!terminate_flag_dummy)
-    //     {
-    //         _Py_PrintReferenceAddresses(out_fd);
-    //         usleep(500000);
-    //     }
-    //     terminate_flag_dummy = 0;
-    //     fprintf(stderr, "finish test thread\n");
-    // }
     static void
     pymain_run_python(int *exitcode)
     {
@@ -676,12 +663,6 @@ extern "C"
         {
             *exitcode = pymain_run_stdin(config, &cf);
         }
-        // terminate_flag_dummy = 1;
-        // terminate_flag = 1;
-        // pthread_join(test_thread, NULL);
-        // fclose(out_fd);
-        // terminate_flag = 1;
-        // pthread_join(bookkeepingThread, NULL);
         fprintf(stderr, "finish eval\n");
 
         pymain_repl(config, &cf, exitcode);

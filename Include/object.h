@@ -69,10 +69,10 @@ whose size is determined when the object is allocated.
 /* Define pointers to support a doubly-linked list of all live heap objects. */
 #define _PyObject_HEAD_EXTRA  \
     struct _object *_ob_next; \
-    struct _object *_ob_prev;
-    // Py_ssize_t prev_refcnt;
+    struct _object *_ob_prev; \
+    Py_ssize_t prev_refcnt;
 
-#define _PyObject_EXTRA_INIT 0, 0,
+#define _PyObject_EXTRA_INIT 0, 0, 0,
 
 #else
 #define _PyObject_HEAD_EXTRA
@@ -121,6 +121,7 @@ whose size is determined when the object is allocated.
     {
         PyObject ob_base;
         Py_ssize_t ob_size; /* Number of items in variable part */
+        Py_ssize_t ob_sizeof;
     } PyVarObject;
 
 /* Cast argument to PyVarObject* type. */
@@ -183,7 +184,7 @@ whose size is determined when the object is allocated.
         FILE *fd;
         unsigned int buff_size;
         unsigned int doIO;
-        unsigned int percent_I_want_to_cnt;
+        Py_ssize_t gen;
     } BookkeepArgs;
     typedef struct
     {
@@ -199,10 +200,13 @@ whose size is determined when the object is allocated.
     extern volatile unsigned int total_num_objs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
+    PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
     PyAPI_FUNC(void *) test_thread_func(void *arg);
     PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(volatile unsigned int) total_num_objs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
+
+    
     // CurTimeObjHeat *curTimeObjHeat = NULL;
     /*
     Type objects contain a string containing the type name (to help somewhat

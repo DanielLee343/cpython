@@ -2657,6 +2657,7 @@ _PyObject_RealIsSubclass(PyObject *derived, PyObject *cls)
 PyObject *
 PyObject_GetIter(PyObject *o)
 {
+        // assert(PyErr_Occurred());
     PyTypeObject *t = Py_TYPE(o);
     getiterfunc f;
 
