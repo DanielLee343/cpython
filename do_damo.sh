@@ -1,12 +1,37 @@
 #!/bin/bash
 # cxl, base
-# DAMON=$HOME/damo/damo
-DAMON=damo
+DAMON=$HOME/damo/damo
+# DAMON=damo
 env=$1
-# which workload
 func=$2
-# bm (bare metal), faas, add later
-# local wl_args=$3
+do_bk=$3
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PLAYGROUND_DIR=/home/lyuze/workspace/obj_heats
+gen_rss()
+{
+    local check_pid=$1
+    local workload_name=$2
+    # local do_graph=$3
+    RSS_FILE=$PLAYGROUND_DIR/"$workload_name"_rss.csv
+    rm -rf $RSS_FILE
+    # if [ "$do_graph" = true ]; then
+    time=0
+    # echo "start gen rss at "$(date)
+    while [ -d "/proc/${check_pid}" ]
+    do
+        cur_rss=$(ps aux | grep $check_pid | awk '{print $6}' | head -n 1 | awk '{print $1/1024}' | bc)
+        # time=$(echo "$time + 0.5" | bc)
+        time=$(date -u '+%s.%N')
+        echo $time","$cur_rss >> $RSS_FILE
+        sleep 0.48
+    done
+    gnuplot -e "output_file='$PLAYGROUND_DIR/"$workload_name"_rss.png'; \
+        input_file='$RSS_FILE'; \
+        wl_title='$workload_name'" \
+        $SCRIPT_DIR/plot_rss.gnuplot 
+    echo "plot rss done"
+}
+
 echo "running $func in $env"
 if [ "$env" = "cxl" ]; then
     cmd_prefix="numactl --cpunodebind 0 --membind 1 -- "
@@ -21,13 +46,17 @@ elif [ "$env" = "org" ]; then
 else
     echo "wrong env, pls try again!"; exit 1
 fi
+if [ "$do_bk" = "" ]; then
+    exit 1
+fi
 echo 1 | sudo tee /proc/sys/vm/drop_caches
 
 cd $HOME/workspace/py_track
-$cmd_prefix /home/lyuze/workspace/cpython/python ./test_trace_thread.py $func 2>/dev/null &
+$cmd_prefix /home/lyuze/workspace/cpython/python ./test_trace_thread.py $func $do_bk &
 check_pid=$!
 echo "workload pid is" $check_pid
-sudo $DAMON record -s 1000 -a 100000 -u 1000000 -n 5000 -m 6000 -o $HOME/workspace/obj_heats/"$func".data $check_pid
+# gen_rss $check_pid "$func"
+sudo $DAMON record -s 1000 -a 100000 -u 1000000 -o $HOME/workspace/obj_heats/"$func".data $check_pid
 
 echo "post processing..."
 

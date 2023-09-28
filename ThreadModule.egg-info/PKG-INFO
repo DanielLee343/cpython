@@ -1,0 +1,4 @@
+Metadata-Version: 2.1
+Name: ThreadModule
+Version: 1.0
+Summary: This is a demo module for threading in CPython

@@ -1,10 +1,20 @@
 #include <Python.h>
+
 static PyObject* python_object_size(PyObject* self, PyObject* args) {
     PyObject* myObject = PyList_New(10);
     Py_ssize_t size = PyObject_Size(myObject);
     fprintf(stderr, "Size of the object: %zd bytes\n", size);
 
+    // PyObject *pModule = PyImport_ImportModule("sys");
+    // PyObject *pDict = PyModule_GetDict(pModule);
+    // PyObject *pGetsizeof = PyDict_GetItemString(pDict, "getsizeof");
+    // PyObject *pList = PyList_New(0); // Create an empty list as an example
+    // PyObject *pArgs = PyTuple_Pack(1, pList);
+    // PyObject *pResult = PyObject_CallObject(pGetsizeof, pArgs);
+    // long memory_size = PyLong_AsLong(pResult);
+    // printf("Memory size: %ld bytes\n", memory_size);
     Py_RETURN_NONE;
+
 }
 
 static PyMethodDef my_extension_methods[] = {

@@ -10,8 +10,7 @@ FILE *output_fd = NULL;
 
 static void thread_func(void *arg)
 {
-    PyGILState_STATE gstate;
-    gstate = PyGILState_Ensure();
+    PyGILState_STATE gstate = PyGILState_Ensure();
 
     // Modify the global variable in the context of this thread
     global_var = PyLong_FromLong(42);
@@ -41,8 +40,9 @@ static PyObject *start_thread(PyObject *self, PyObject *args)
     unsigned int sample_dur;
     unsigned int buff_size;
     const char *file;
-    PyObject* doIO;
-    if (!PyArg_ParseTuple(args, "ii|sO", &sample_dur, &buff_size, &file, &doIO))
+    unsigned int doIO;
+    unsigned int percent_I_want_to_cnt;
+    if (!PyArg_ParseTuple(args, "ii|sii", &sample_dur, &buff_size, &file, &doIO, &percent_I_want_to_cnt))
     {
         return NULL; // error
     }
@@ -67,6 +67,7 @@ static PyObject *start_thread(PyObject *self, PyObject *args)
     bookkeepArgs->fd = output_fd;
     bookkeepArgs->buff_size = buff_size;
     bookkeepArgs->doIO = doIO;
+    bookkeepArgs->percent_I_want_to_cnt = percent_I_want_to_cnt;
 
     // fprintf(stderr, "buff size in shared module is %d\n", bookkeepArgs->buff_size);
     long thread_id = PyThread_start_new_thread(ref_cnt_changes, (void *)bookkeepArgs);
@@ -81,12 +82,12 @@ static PyObject *close_thread(PyObject *self, PyObject *args)
 {
     // terminate_thread_flag = 1;
     terminate_flag_dummy = 1;
-    // sleep(5);
+    usleep(2000000);
     // while (terminate_flag_dummy == 1) {
     //     fprintf(stderr, "flush not complete, still waiting...\n");
     //     usleep(500000);
     // }
-    // fprintf(stderr, "flush complete, closing fd\n");
+    fprintf(stderr, "flush complete, closing fd\n");
     fclose(output_fd);
     Py_RETURN_NONE;
 }
@@ -97,6 +98,7 @@ static PyMethodDef ThreadMethods[] = {
     {"start_thread", start_thread, METH_VARARGS, "Start a new thread."},
     {"close_thread", close_thread, METH_NOARGS, "Signal the thread to stop."},
     {NULL, NULL, 0, NULL}};
+    
 static struct PyModuleDef threadmodule = {
     PyModuleDef_HEAD_INIT,
     "threadmodule",

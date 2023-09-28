@@ -1,0 +1,6 @@
+setup.py
+threadmodule.c
+ThreadModule.egg-info/PKG-INFO
+ThreadModule.egg-info/SOURCES.txt
+ThreadModule.egg-info/dependency_links.txt
+ThreadModule.egg-info/top_level.txt
