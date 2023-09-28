@@ -70,9 +70,10 @@ whose size is determined when the object is allocated.
 #define _PyObject_HEAD_EXTRA  \
     struct _object *_ob_next; \
     struct _object *_ob_prev; \
-    Py_ssize_t prev_refcnt;
+    unsigned int prev_refcnt; \
+    unsigned int cur_size_bytes;
 
-#define _PyObject_EXTRA_INIT 0, 0, 0,
+#define _PyObject_EXTRA_INIT 0, 0, 0, 0,
 
 #else
 #define _PyObject_HEAD_EXTRA

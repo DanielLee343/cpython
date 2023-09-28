@@ -2494,7 +2494,7 @@ PyObjHM *allPyObjHM = NULL;
             for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
             {
                 op->prev_refcnt = op->ob_refcnt;
-                PyObject *iterator = PyObject_GetIter(op);
+                // PyObject *iterator = PyObject_GetIter(op);
             }
             #endif
             #ifdef Py_TRACE_REFS_HM

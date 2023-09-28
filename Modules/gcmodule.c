@@ -380,6 +380,24 @@ append_objects(PyObject *py_list, PyGC_Head *gc_list)
     return 0;
 }
 
+static int
+append_objects_untrack_self(PyObject *py_list, PyGC_Head *gc_list)
+{
+    PyGC_Head *gc;
+    for (gc = GC_NEXT(gc_list); gc != gc_list; gc = GC_NEXT(gc))
+    {
+        PyObject *op = FROM_GC(gc);
+        if (op != py_list){ // make sure not to track this list 
+            if (PyList_Append(py_list, op))
+            {
+                return -1; /* exception */
+            }
+            Py_DECREF(op); // make sure to decrease op refcnt because it's increased in PyList_Append()
+        }
+    }
+    return 0;
+}
+
 // Constants for validate_list's flags argument.
 enum flagstates
 {
@@ -1930,20 +1948,51 @@ error:
     return NULL;
 }
 
+void update_pyobj_size(PyObject * op) {
+    Py_ssize_t vanilla_size;
+    if (PyList_Check(op)) { //list
+        vanilla_size = (_PyObject_SIZE(Py_TYPE(op)) + ((PyListObject *)op)->allocated * sizeof(void*));
+    } else if (PyLong_Check(op)) { // long
+        vanilla_size = (offsetof(PyLongObject, ob_digit) + Py_ABS(Py_SIZE(op))*sizeof(digit));
+    } else if (PyType_Check(op)) { // type and subtype, but only able to find 'type' and 'ABC Meta' why??
+        fprintf(stderr, "type obj is: %s\n", op->ob_type->tp_name);
+        if (((PyTypeObject *)op)->tp_flags & Py_TPFLAGS_HEAPTYPE) {
+            PyHeapTypeObject* et = (PyHeapTypeObject*)(PyTypeObject *)(op);
+            vanilla_size = sizeof(PyHeapTypeObject);
+            if (et->ht_cached_keys)
+                vanilla_size += _PyDict_KeysSize(et->ht_cached_keys);
+        }
+        else
+            vanilla_size = sizeof(PyTypeObject);
+    } else {// not found for existing pyobject type, set as 0??
+        fprintf(stderr, "type not found: %s\n", op->ob_type->tp_name);
+        op->cur_size_bytes = 0;
+        return;
+    }
+    if (_PyObject_IS_GC(op))
+        op->cur_size_bytes = (unsigned int)(((size_t)vanilla_size) + sizeof(PyGC_Head)); // add GC Head
+}
+
+/* Update prev_refcnt, before sampling, 
+    and cascades to internal objects, eg., all Longs insides a PyList */
 void update_prev_refs(PyObject *result) {
     Py_ssize_t cur_size = 0;
-    PyObject *iterator = PyObject_GetIter(result);
+    PyObject *iterator = PyObject_GetIter(result); // iterator is a pyobject hence it's refcnt is init as 1, but we don't track it down here, so we are fine
     if (iterator) {
-        cur_size = PyList_Size(result);
+        cur_size = PyList_Size(result); // does not increase refcnt 
         for (Py_ssize_t i = 0; i < cur_size; i++) {
-            PyObject *op = PyList_GetItem(result, i);
+            PyObject *op = PyList_GetItem(result, i); // does not increase refcnt 
             op->prev_refcnt = op->ob_refcnt;
+            // op->cur_size_bytes = _PySys_GetSizeOf(op); // this is too slow, 84% slower
+            update_pyobj_size(op);
             PyObject *inner_iterator = PyObject_GetIter(op);
             if(inner_iterator){
                 Py_ssize_t inner_size = PyList_Size(op);
                 for (Py_ssize_t i = 0; i < inner_size; i++) {
                     PyObject *inner_op = PyList_GetItem(op, i);
                     inner_op->prev_refcnt = inner_op->ob_refcnt;
+                    // inner_op->cur_size_bytes = _PySys_GetSizeOf(inner_op);
+                    update_pyobj_size(inner_op);
                 }
             }
         }
@@ -1957,7 +2006,6 @@ gc_get_objects_impl_no_mod(Py_ssize_t generation)
     int i;
     PyObject *result;
     GCState *gcstate = &tstate->interp->gc;
-    // FILE *obj_dump_fd = fopen("/home/lyuze/workspace/obj_heats/obj_dump.txt", "w");
 
     if (PySys_Audit("gc.get_objects", "n", generation) < 0)
     {
@@ -1988,7 +2036,7 @@ gc_get_objects_impl_no_mod(Py_ssize_t generation)
             goto error;
         }
 
-        if (append_objects(result, GEN_HEAD(gcstate, generation)))
+        if (append_objects_untrack_self(result, GEN_HEAD(gcstate, generation)))
         {
             goto error;
         }
@@ -1999,7 +2047,7 @@ gc_get_objects_impl_no_mod(Py_ssize_t generation)
     /* If generation is not passed or None, get all objects from all generations */
     for (i = 0; i < NUM_GENERATIONS; i++)
     {
-        if (append_objects(result, GEN_HEAD(gcstate, i)))
+        if (append_objects_untrack_self(result, GEN_HEAD(gcstate, i)))
         {
             goto error;
         }
@@ -2065,6 +2113,7 @@ void *thread_trace_from_gc_list(void *arg)
         //         Py_DECREF(repr);
         //     }
         // }
+        Py_DECREF(cur_list); //free cur_list
         PyGILState_Release(gstate);
         // if (cur_buff_count > buff_size)
         // {
