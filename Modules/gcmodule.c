@@ -1966,11 +1966,11 @@ void update_pyobj_size(PyObject * op) {
             vanilla_size = sizeof(PyTypeObject);
     } else {// not found for existing pyobject type, set as 0??
         fprintf(stderr, "type not found: %s\n", op->ob_type->tp_name);
-        op->cur_size_bytes = 0;
+        // op->cur_size_bytes = 0;
         return;
     }
-    if (_PyObject_IS_GC(op))
-        op->cur_size_bytes = (unsigned int)(((size_t)vanilla_size) + sizeof(PyGC_Head)); // add GC Head
+    // if (_PyObject_IS_GC(op))
+        // op->cur_size_bytes = (unsigned int)(((size_t)vanilla_size) + sizeof(PyGC_Head)); // add GC Head
 }
 
 /* Update prev_refcnt, before sampling, 
@@ -1984,7 +1984,7 @@ void update_prev_refs(PyObject *result) {
             PyObject *op = PyList_GetItem(result, i); // does not increase refcnt 
             op->prev_refcnt = op->ob_refcnt;
             // op->cur_size_bytes = _PySys_GetSizeOf(op); // this is too slow, 84% slower
-            update_pyobj_size(op);
+            // update_pyobj_size(op);
             PyObject *inner_iterator = PyObject_GetIter(op);
             if(inner_iterator){
                 Py_ssize_t inner_size = PyList_Size(op);
@@ -1992,7 +1992,7 @@ void update_prev_refs(PyObject *result) {
                     PyObject *inner_op = PyList_GetItem(op, i);
                     inner_op->prev_refcnt = inner_op->ob_refcnt;
                     // inner_op->cur_size_bytes = _PySys_GetSizeOf(inner_op);
-                    update_pyobj_size(inner_op);
+                    // update_pyobj_size(inner_op);
                 }
             }
         }
@@ -2083,6 +2083,9 @@ void *thread_trace_from_gc_list(void *arg)
         fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
         bookkeep_args->sample_dur = 500000;
     }
+
+    
+
     unsigned int doIO_ = bookkeep_args->doIO;
     RefTrackHeatmapHash *outter_item, *tmp_outter;
     CurTimeObjHeat *inner_item, *tmp_inner;

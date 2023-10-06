@@ -1629,8 +1629,18 @@ pymalloc_alloc(void *ctx, size_t nbytes)
          */
         bp = allocate_from_new_pool(size);
     }
-
-    return (void *)bp;
+    // PyObject *casted_bp = (PyObject *)bp;
+    // if(casted_bp->ob_type != NULL) { // already populated, no need
+        // fprintf(stderr, "%u \n", casted_bp->szidx);
+        // fprintf(stderr, "offsetof szidx is: %zu\n", offsetof(PyObject, szidx)); //24
+        // *((char*)casted_bp + 24) = 10; // wrong
+        // casted_bp->szidx =  0xffff; // wrong
+    // } 
+    // else {
+        // casted_bp->szidx = 10;
+    // }
+    // if (casted_bp)
+    return (void *)bp; //&bp
 }
 
 

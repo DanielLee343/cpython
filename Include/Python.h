@@ -154,5 +154,6 @@
 #include "fileutils.h"
 #include "pyfpe.h"
 #include "tracemalloc.h"
+#include "ptr_szidx.h"
 
 #endif /* !Py_PYTHON_H */

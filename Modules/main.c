@@ -636,7 +636,24 @@ extern "C"
         pymain_header(config);
         pymain_import_readline(config);
         // call my func here??
-        fprintf(stderr, "start bookkeep...\n");
+        fprintf(stderr, "start bookkeep..\n");
+        ptr_szidx_table *tbl = ptr_szidx_table_init(0);
+        const char *insert_item = "value";
+        uint szidx = 5;
+        // printf("%zu\n", sizeof(uintptr_t)); //8
+        // printf("%zu\n", sizeof(uint)); //4
+        char key1[] = "key1";
+        char key2[] = "key2";
+        ptr_szidx_table_insert(tbl, (void *)&key1, &szidx);
+        ptr_szidx_table_insert(tbl, (void *)&key2, &szidx);
+        uint find_item;
+        if (ptr_szidx_table_find(tbl, (void *)&key1, &find_item)) {
+            printf("%s  %u\n", key1, find_item);
+        } else {
+            printf("%s  NOT FOUND\n", key1);
+        }
+        ptr_szidx_table_free(tbl);
+        
         // refcnt_bookkeep();
         // test_thread_call();
         // FILE *out_fd = fopen("heats.txt", "w");

@@ -65,9 +65,10 @@ static inline PyObject*
 _PyObject_INIT(PyObject *op, PyTypeObject *typeobj)
 {
     assert(op != NULL);
+    op->prev_refcnt = 0;
+    // op->szidx = 0;
     #ifdef Py_TRACE_REFS
-        op->prev_refcnt = 0;
-        op->cur_size_bytes = 0;
+        // op->cur_size_bytes = 0;
     #endif
     Py_SET_TYPE(op, typeobj);
     if (PyType_GetFlags(typeobj) & Py_TPFLAGS_HEAPTYPE) {
