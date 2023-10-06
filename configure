@@ -2757,9 +2757,9 @@ if test "$srcdir" != . -a "$srcdir" != "$(pwd)"; then
     #  regenerated when building out-of-tree, regardless of whether or not
     #  the $srcdir counterpart is up-to-date.  This is an acceptable trade
     #  off.)
-    BASECPPFLAGS="-IObjects -IInclude -IPython"
+    BASECPPFLAGS="-IObjects -IInclude -IPython -I/home/lyuze/workspace/libcuckoo/install/include"
 else
-    BASECPPFLAGS=""
+    BASECPPFLAGS="-I/home/lyuze/workspace/libcuckoo/install/include"
 fi
 
 
@@ -7688,7 +7688,7 @@ if test "$assertions" = 'true'; then
 else
   OPT="-DNDEBUG $OPT"
 fi
-
+OPT="$OPT -I/home/lyuze/workspace/py_track/uthash/include"
 if test "$ac_arch_flags"
 then
 	BASECFLAGS="$BASECFLAGS $ac_arch_flags"
