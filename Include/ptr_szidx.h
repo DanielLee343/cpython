@@ -1,11 +1,11 @@
-#ifndef CUCKOO_WRAPPER_H
-#define CUCKOO_WRAPPER_H
-
+#ifndef PTR_SZIEOF_H
+#define PTR_SZIEOF_H
+#include <stdint.h>
 // void insert(void *ptr, unsigned int value);
 // unsigned int find(void *ptr);
 #define CUCKOO_TABLE_NAME ptr_szidx_table
-#define CUCKOO_KEY_TYPE void *
-#define CUCKOO_MAPPED_TYPE unsigned int
+#define CUCKOO_KEY_TYPE uintptr_t
+#define CUCKOO_MAPPED_TYPE size_t
 #include <libcuckoo-c/cuckoo_table_template.h>
 
-#endif // CUCKOO_WRAPPER_H
+#endif // PTR_SZIEOF_H

@@ -192,7 +192,7 @@ extern "C"
     PyAPI_FUNC(void) _PyGC_InitState(struct _gc_runtime_state *);
     PyAPI_FUNC(PyObject *) gc_get_objects_impl_no_mod(Py_ssize_t generation);
     
-    extern RefTrackHeatmapHash *allHeats_GC_list;
+    // extern RefTrackHeatmapHash *allHeats_GC_list;
     extern volatile short terminate_flag;
     PyAPI_DATA(volatile short) terminate_flag;
     // PyAPI_FUNC(void) _PyRefTrack_InitState(struct _reftrack_runtime_state *);

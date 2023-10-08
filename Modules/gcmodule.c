@@ -31,6 +31,14 @@
 #include "pycore_pystate.h" // _PyThreadState_GET()
 #include "pydtrace.h"
 #include "pytime.h" // _PyTime_GetMonotonicClock()
+#undef CUCKOO_TABLE_NAME
+#undef CUCKOO_KEY_TYPE
+#undef CUCKOO_MAPPED_TYPE
+#include "allHeats.h"
+#undef CUCKOO_TABLE_NAME
+#undef CUCKOO_KEY_TYPE
+#undef CUCKOO_MAPPED_TYPE
+#include "curHeats.h"
 
 typedef struct _gc_runtime_state GCState;
 // typedef struct _reftrack_runtime_state ReftrackState;
@@ -74,7 +82,7 @@ module gc
 /* Get the object given the GC head */
 #define FROM_GC(g) ((PyObject *)(((PyGC_Head *)g) + 1))
 volatile short terminate_flag = 0;
-RefTrackHeatmapHash *allHeats_GC_list = NULL;
+// RefTrackHeatmapHash *allHeats_GC_list = NULL;
 static inline int
 gc_is_collecting(PyGC_Head *g)
 {
@@ -375,24 +383,6 @@ append_objects(PyObject *py_list, PyGC_Head *gc_list)
             {
                 return -1; /* exception */
             }
-        }
-    }
-    return 0;
-}
-
-static int
-append_objects_untrack_self(PyObject *py_list, PyGC_Head *gc_list)
-{
-    PyGC_Head *gc;
-    for (gc = GC_NEXT(gc_list); gc != gc_list; gc = GC_NEXT(gc))
-    {
-        PyObject *op = FROM_GC(gc);
-        if (op != py_list){ // make sure not to track this list 
-            if (PyList_Append(py_list, op))
-            {
-                return -1; /* exception */
-            }
-            Py_DECREF(op); // make sure to decrease op refcnt because it's increased in PyList_Append()
         }
     }
     return 0;
@@ -1890,6 +1880,7 @@ static PyObject *
 gc_get_objects_impl(PyObject *module, Py_ssize_t generation)
 /*[clinic end generated code: output=48b35fea4ba6cb0e input=ef7da9df9806754c]*/
 {
+    
     PyThreadState *tstate = _PyThreadState_GET();
     int i;
     PyObject *result;
@@ -1977,13 +1968,14 @@ void update_pyobj_size(PyObject * op) {
     and cascades to internal objects, eg., all Longs insides a PyList */
 void update_prev_refs(PyObject *result) {
     Py_ssize_t cur_size = 0;
+    // for certian the GC_list is iterable 
     PyObject *iterator = PyObject_GetIter(result); // iterator is a pyobject hence it's refcnt is init as 1, but we don't track it down here, so we are fine
     if (iterator) {
         cur_size = PyList_Size(result); // does not increase refcnt 
         for (Py_ssize_t i = 0; i < cur_size; i++) {
             PyObject *op = PyList_GetItem(result, i); // does not increase refcnt 
             op->prev_refcnt = op->ob_refcnt;
-            // op->cur_size_bytes = _PySys_GetSizeOf(op); // this is too slow, 84% slower
+            // op->cur_size_bytes = _PySys_GetSizeOf(op); // this is too slow
             // update_pyobj_size(op);
             PyObject *inner_iterator = PyObject_GetIter(op);
             if(inner_iterator){
@@ -2036,18 +2028,17 @@ gc_get_objects_impl_no_mod(Py_ssize_t generation)
             goto error;
         }
 
-        if (append_objects_untrack_self(result, GEN_HEAD(gcstate, generation)))
+        if (append_objects(result, GEN_HEAD(gcstate, generation)))
         {
             goto error;
         }
         update_prev_refs(result);
         return result;
     }
-
     /* If generation is not passed or None, get all objects from all generations */
     for (i = 0; i < NUM_GENERATIONS; i++)
     {
-        if (append_objects_untrack_self(result, GEN_HEAD(gcstate, i)))
+        if (append_objects(result, GEN_HEAD(gcstate, i)))
         {
             goto error;
         }
@@ -2084,25 +2075,95 @@ void *thread_trace_from_gc_list(void *arg)
         bookkeep_args->sample_dur = 500000;
     }
 
-    
-
+    all_heats_table *allHeats = all_heats_table_init(0);
+    all_heats_table_locked_table *allHeats_locked = all_heats_table_lock_table(allHeats);
+    ts_blob outter_key_wrapper;
+    cur_heats_table *curHeats;
+    cur_heats_table_locked_table *curHeats_locked;
     unsigned int doIO_ = bookkeep_args->doIO;
-    RefTrackHeatmapHash *outter_item, *tmp_outter;
-    CurTimeObjHeat *inner_item, *tmp_inner;
+    // RefTrackHeatmapHash *outter_item, *tmp_outter;
+    // CurTimeObjHeat *inner_item, *tmp_inner;
     while (!terminate_flag)
     {
         PyGILState_STATE gstate = PyGILState_Ensure();
-        PyObject *cur_list = gc_get_objects_impl_no_mod(bookkeep_args->gen); // generation index, [-1, 0, 1, 2], where -1 means all generations
-       
+        PyObject *cur_list_from_GC = gc_get_objects_impl_no_mod(bookkeep_args->gen); // generation index, [-1, 0, 1, 2], where -1 means all generations
         Py_BEGIN_ALLOW_THREADS
             usleep(bookkeep_args->sample_dur);
         Py_END_ALLOW_THREADS
-        
-        /* the follow should not block app thread */
-        RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
-        clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
-        oneColumnHeat->curTimeObjHeat = NULL;
-        HASH_ADD_INT(allHeats_GC_list, ts, oneColumnHeat);
+        PyGILState_Release(gstate);
+        // the following we don't need to hold the lock
+        // init timespec into ts key
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        outter_key_wrapper.ts = ts;
+        printf("%ld:%ld\n", outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec);
+        // init curHeats table
+        curHeats = cur_heats_table_init(0);
+        curHeats_locked = cur_heats_table_lock_table(curHeats);
+        uintptr_t curHeats_locked_casted = (uintptr_t)curHeats_locked;
+        all_heats_table_locked_table_insert(allHeats_locked, &outter_key_wrapper, &curHeats_locked_casted, NULL);
+        Temperature temp;
+        Py_ssize_t list_size = PyList_Size(cur_list_from_GC);
+        fprintf(stderr, "cursize is %zu\n", list_size);
+        size_t foundSizeof; // can be here?? make sure populated correctly, but in or out doesn't matter anyway
+        for (Py_ssize_t i = 0; i < list_size; i++) {
+            PyObject *op = PyList_GetItem(cur_list_from_GC, i);
+            // insert curHeat KV
+            temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
+            // find the <op: szidx> from ptr_szidx_table
+            /* here we must be find op with PyGC_head, not op, 
+                since when we insert KV in pymalloc_alloc(), 
+                ptr includes PyGC_HEAD for PyVarObject
+            */
+            uintptr_t op_w_gc_casted = (uintptr_t)AS_GC(op);
+            if (ptr_szidx_table_find(tbl, &op_w_gc_casted, &foundSizeof)) {
+                temp.cur_sizeof = foundSizeof;
+                // fprintf(stderr, "find %p, size is %zu\n", op, foundSizeof);
+                // PyObject_Print(op, stderr, 1); // uncomment if interested in what objects are traced
+                // fprintf(stderr, "\n");
+                cur_heats_table_locked_table_insert(curHeats_locked, (void *)op_w_gc_casted, &temp, NULL);
+                cur_buff_count++;
+            } else {
+                // this print shouldn't appear, if insert correnctly
+                fprintf(stderr, "not found outter %p, type is %s\n", op, op->ob_type->tp_name);
+            }
+            // Now do a cascade tracing, for each (potential) op, might be iterable
+            PyObject *cur_op_iter = PyObject_GetIter(op);
+            if (cur_op_iter) {
+                Py_ssize_t inner_size = PyList_Size(op);
+                for(Py_ssize_t i = 0; i < inner_size; i++) {
+                    PyObject *inner_op = PyList_GetItem(op, i);
+                    temp.diff = (long)(inner_op->ob_refcnt - inner_op->prev_refcnt); // record diff regardless of obj type
+                    if (_PyObject_IS_GC(inner_op) && _PyObject_GC_IS_TRACKED(inner_op)) // check whether each inner_op is traced by GC
+                    {// if so, has GC_HEAD, we need to get op from ptr_sizeof_table using AS_GC(inner_op), not inner_op
+                        op_w_gc_casted = (uintptr_t)AS_GC(inner_op);
+                        if (ptr_szidx_table_find(tbl, &op_w_gc_casted, &foundSizeof)) {
+                            temp.cur_sizeof = foundSizeof;
+                            cur_heats_table_locked_table_insert(curHeats_locked, (void *)op_w_gc_casted, &temp, NULL);
+                            cur_buff_count++;
+                        } else {
+                            fprintf(stderr, "not found inner container type %p, type is %s\n", inner_op, inner_op->ob_type->tp_name);
+                        }
+                    } else { // not traced by GC, safe to use ineer_op
+                        if (ptr_szidx_table_find(tbl, &inner_op, &foundSizeof)) {
+                            temp.cur_sizeof = foundSizeof;
+                            cur_heats_table_locked_table_insert(curHeats_locked, (void *)inner_op, &temp, NULL);
+                            cur_buff_count++;
+                        } else {
+                            fprintf(stderr, "not found inner normal type%p, type is %s\n", inner_op, inner_op->ob_type->tp_name);
+                        }
+                    }
+                }
+            }
+        }
+        // PyGILState_Release(gstate);
+               
+    //     /* the follow should not block app thread */
+    //      /* old one, delete later*/
+    //     RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
+    //     clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
+    //     oneColumnHeat->curTimeObjHeat = NULL;
+    //     HASH_ADD_INT(allHeats_GC_list, ts, oneColumnHeat);
 
         // fprintf(bookkeep_args->fd, "Size of list %zd: %zd\n", gen, cur_size);
         // fflush(bookkeep_args->fd);
@@ -2116,36 +2177,27 @@ void *thread_trace_from_gc_list(void *arg)
         //         Py_DECREF(repr);
         //     }
         // }
-        Py_DECREF(cur_list); //free cur_list
-        PyGILState_Release(gstate);
+        /* must free cur_list_from_GC, 
+            otherwise next tracing loop will count the current loop's gc list! */
+        Py_DECREF(cur_list_from_GC); 
+       
         // if (cur_buff_count > buff_size)
         // {
         //     if (doIO_) {
         //         fprintf(stderr, "doing IO...\n");
-        //         fflush(stderr);
-        //         HASH_ITER(hh, allHeats_GC_list, outter_item, tmp_outter)
-        //         {
-        //             HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-        //             {
-        //                 fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
-        //                         outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
-        //                         inner_item->op_, inner_item->temp.tp_name, 
-        //                         inner_item->temp.sizeof_op,
-        //                         inner_item->temp.diff);
-        //                 fflush(bookkeep_args->fd);
+        //         // fflush(stderr);
+        //         uintptr_t foundOtter;
+        //         // iterate allHeats table
+        //         all_heats_table_iterator *allHeats_it = all_heats_table_locked_table_begin(allHeats_locked);
+        //         all_heats_table_iterator *allHeats_end = all_heats_table_locked_table_end(allHeats_locked);
+        //         for (; !all_heats_table_iterator_equal(allHeats_it, allHeats_end);
+        //             all_heats_table_iterator_increment(allHeats_it)){
+        //                 outter_key_wrapper = *all_heats_table_iterator_key(allHeats_it);
+        //                 foundOtter = *all_heats_table_iterator_mapped(allHeats_it);
+        //                 fprintf(stderr, "found otter K.sec: %ld, V: %ld\n", outter_key_wrapper.ts.tv_sec, foundOtter);
         //             }
-        //         }
-        //     }
-        //     HASH_ITER(hh, allHeats_GC_list, outter_item, tmp_outter)
-        //     {
-        //         HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-        //         {
-        //             HASH_DEL(outter_item->curTimeObjHeat, inner_item);
-        //             free(inner_item->temp.tp_name);
-        //             free(inner_item);
-        //         }
-        //         HASH_DEL(allHeats_GC_list, outter_item);
-        //         free(outter_item);
+        //             cur_heats_table_iterator *curHeats_it = cur_heats_table_locked_table_begin((cur_heats_table_locked_table *)foundOtter);
+        //             cur_heats_table_iterator *curHeats_end = cur_heats_table_locked_table_end((cur_heats_table_locked_table *)foundOtter);
         //     }
         //     cur_buff_count = 0;
         // }

@@ -19,7 +19,7 @@ extern "C"
 #endif
 // volatile unsigned int total_num_objs = 0;
 // #ifdef Py_TRACE_REFS_HM
-PyObjHM *allPyObjHM = NULL;
+// PyObjHM *allPyObjHM = NULL;
 // #endif
     /* Defined in tracemalloc.c */
     extern void _PyMem_DumpTraceback(int fd, const void *ptr);
@@ -2435,204 +2435,184 @@ PyObjHM *allPyObjHM = NULL;
     }
 
 // my own tracing starts here
-#define NUM_THREADS 1
-    // BookkeepArgs bookkeepArgs = {0, "test_heats.txt"};
-    volatile short terminate_flag_dummy = 0;
-    RefTrackHeatmapHash *allHeats = NULL;
+// #define NUM_THREADS 1
+    // volatile short terminate_flag_dummy = 0;
+    // RefTrackHeatmapHash *allHeats = NULL;
     unsigned int SAMPLE_DUR; // sample duration, default 0.5 s
-    void *test_thread_func(void *arg)
-    {
-        PyGILState_STATE gstate = PyGILState_Ensure();
-        // FILE *out_fd = fopen("/home/lyuze/cpython/heats.txt", "w");
-        FILE *out_fd = (FILE *)(arg);
-        fprintf(stderr, "start bookkeeping thread\n");
-        while (!terminate_flag_dummy)
-        {
-            // _Py_PrintReferenceAddresses(out_fd);
-            fprintf(out_fd, "something to write\n");
-            Py_BEGIN_ALLOW_THREADS
-                usleep(500000);
-            Py_END_ALLOW_THREADS
-        }
-        terminate_flag_dummy = 0; // reset terminate_flag
-        // fclose(out_fd);
-        fprintf(stderr, "finish bookkeeping thread\n");
-        PyGILState_Release(gstate);
-    }
 
     void *ref_cnt_changes(void *arg)
     {
         fprintf(stderr, "start bookkeep thread\n");
-        BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-        unsigned int cur_buff_count;
-        unsigned int buff_size = bookkeep_args->buff_size;
-        // double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
-        fprintf(stderr, "buff_size is %d\n", buff_size);
-        if (buff_size == 0)
-        {
-            fprintf(stderr, "buff_size not set, setting to 1024\n");
-            buff_size = 5120;
-        }
-        if (bookkeep_args->fd == NULL)
-        {
-            perror("Failed to find fd passed in\n");
-        }
-        if (bookkeep_args->sample_dur == 0)
-        {
-            fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
-            bookkeep_args->sample_dur = 500000;
-        }
-        unsigned int doIO_ = bookkeep_args->doIO;
-        RefTrackHeatmapHash *outter_item, *tmp_outter;
-        CurTimeObjHeat *inner_item, *tmp_inner;
-        while (!terminate_flag_dummy)
-        {
-            PyGILState_STATE gstate = PyGILState_Ensure();
-            PyObjHM *cur_pyobj, *cur_pyobj_tmp;
-            PyObject *op;
-            #ifdef Py_TRACE_REFS
-            for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
-            {
-                op->prev_refcnt = op->ob_refcnt;
-                // PyObject *iterator = PyObject_GetIter(op);
-            }
-            #endif
-            #ifdef Py_TRACE_REFS_HM
-            HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
-            {
-            //     Py_ssize_t dummy = cur_pyobj->op->ob_refcnt;
-                // fprintf(bookkeep_args->fd, "%zu ", cur_pyobj->op->ob_refcnt);
-                // fprintf(bookkeep_args->fd, "%ld\t%zu\n"
-                //                     ,(unsigned long)cur_pyobj->op
-                //                     , cur_pyobj->op->ob_refcnt
-                //                     );
-                cur_pyobj->prev_refcnt = cur_pyobj->op->ob_refcnt;
-            }
-            #endif
-            PyGILState_Release(gstate);
-            // Py_BEGIN_ALLOW_THREADS
-                usleep(bookkeep_args->sample_dur);
-            // Py_END_ALLOW_THREADS
-            RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
-            clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
-            oneColumnHeat->curTimeObjHeat = NULL;
-            HASH_ADD_INT(allHeats, ts, oneColumnHeat);
+        // BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
+        // unsigned int cur_buff_count;
+        // unsigned int buff_size = bookkeep_args->buff_size;
+        // // double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
+        // fprintf(stderr, "buff_size is %d\n", buff_size);
+        // if (buff_size == 0)
+        // {
+        //     fprintf(stderr, "buff_size not set, setting to 1024\n");
+        //     buff_size = 5120;
+        // }
+        // if (bookkeep_args->fd == NULL)
+        // {
+        //     perror("Failed to find fd passed in\n");
+        // }
+        // if (bookkeep_args->sample_dur == 0)
+        // {
+        //     fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
+        //     bookkeep_args->sample_dur = 500000;
+        // }
+        // unsigned int doIO_ = bookkeep_args->doIO;
+        // RefTrackHeatmapHash *outter_item, *tmp_outter;
+        // CurTimeObjHeat *inner_item, *tmp_inner;
+        // while (!terminate_flag_dummy)
+        // {
+        //     PyGILState_STATE gstate = PyGILState_Ensure();
+        //     PyObjHM *cur_pyobj, *cur_pyobj_tmp;
+        //     PyObject *op;
+        //     #ifdef Py_TRACE_REFS
+        //     for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next)
+        //     {
+        //         op->prev_refcnt = op->ob_refcnt;
+        //         // PyObject *iterator = PyObject_GetIter(op);
+        //     }
+        //     #endif
+        //     #ifdef Py_TRACE_REFS_HM
+        //     HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
+        //     {
+        //     //     Py_ssize_t dummy = cur_pyobj->op->ob_refcnt;
+        //         // fprintf(bookkeep_args->fd, "%zu ", cur_pyobj->op->ob_refcnt);
+        //         // fprintf(bookkeep_args->fd, "%ld\t%zu\n"
+        //         //                     ,(unsigned long)cur_pyobj->op
+        //         //                     , cur_pyobj->op->ob_refcnt
+        //         //                     );
+        //         cur_pyobj->prev_refcnt = cur_pyobj->op->ob_refcnt;
+        //     }
+        //     #endif
+        //     PyGILState_Release(gstate);
+        //     // Py_BEGIN_ALLOW_THREADS
+        //         usleep(bookkeep_args->sample_dur);
+        //     // Py_END_ALLOW_THREADS
+        //     RefTrackHeatmapHash *oneColumnHeat = malloc(sizeof(*oneColumnHeat));
+        //     clock_gettime(CLOCK_MONOTONIC, &(oneColumnHeat->ts));
+        //     oneColumnHeat->curTimeObjHeat = NULL;
+        //     HASH_ADD_INT(allHeats, ts, oneColumnHeat);
 
-            // unsigned int cur_obj_cnt = 0;
-            // double num_I_want_to_count_db = percent_I_want_to_cnt * (double)total_num_objs;
-            // unsigned int rounded_num_I_want_to_count = (unsigned int)ceil(num_I_want_to_count_db);
-            // fprintf(stderr, "# objs I want to cnt: %u\n", rounded_num_I_want_to_count);
+        //     // unsigned int cur_obj_cnt = 0;
+        //     // double num_I_want_to_count_db = percent_I_want_to_cnt * (double)total_num_objs;
+        //     // unsigned int rounded_num_I_want_to_count = (unsigned int)ceil(num_I_want_to_count_db);
+        //     // fprintf(stderr, "# objs I want to cnt: %u\n", rounded_num_I_want_to_count);
             
-            #ifdef Py_TRACE_REFS_HM
-            HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
-            {
-                CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
-                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(cur_pyobj->op); // must hold GIL
-                curTimeObjHeat->temp.sizeof_op = 0;
-                char *tp_name_str;
-                if (cur_pyobj->op->ob_type) {
-                    tp_name_str = cur_pyobj->op->ob_type->tp_name;
-                } else {
-                    tp_name_str = "type_dealloced";
-                }
-                curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
-                strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
+        //     #ifdef Py_TRACE_REFS_HM
+        //     HASH_ITER(hh, allPyObjHM, cur_pyobj, cur_pyobj_tmp)
+        //     {
+        //         CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
+        //         curTimeObjHeat->temp.diff = cur_pyobj->op->ob_refcnt - cur_pyobj->prev_refcnt;
+        //         // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(cur_pyobj->op); // must hold GIL
+        //         curTimeObjHeat->temp.sizeof_op = 0;
+        //         char *tp_name_str;
+        //         if (cur_pyobj->op->ob_type) {
+        //             tp_name_str = cur_pyobj->op->ob_type->tp_name;
+        //         } else {
+        //             tp_name_str = "type_dealloced";
+        //         }
+        //         curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
+        //         strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
 
-                curTimeObjHeat->op_ = cur_pyobj->op;
-                HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
-                cur_buff_count += 1;
-                // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
-                //     break;
-                // }
-            }
-            #endif
-            #ifdef Py_TRACE_REFS
-            // in this case the prev_cnt is stored in PyObject, not in PyObjHM
-            for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next) {
-                CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
-                curTimeObjHeat->temp.diff = op->ob_refcnt - op->prev_refcnt;
-                // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);  // must hold GIL
-                curTimeObjHeat->temp.sizeof_op = 0;
-                char *tp_name_str;
-                if (op->ob_type) {
-                    tp_name_str = op->ob_type->tp_name;
-                } else {
-                    tp_name_str = "type_dealloced";
-                }
-                curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
-                strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
-                curTimeObjHeat->op_ = op;
-                HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
-                cur_buff_count += 1;
-                // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
-                //     break;
-                // }
-            }
-            #endif
-            // PyGILState_Release(gstate);
-            // unsigned int num_samples = HASH_COUNT(allHeats);
-            if (cur_buff_count > buff_size)
-            {
-                if (doIO_) {
-                    fprintf(stderr, "doing IO...\n");
-                    fflush(stderr);
-                    HASH_ITER(hh, allHeats, outter_item, tmp_outter)
-                    {
-                        HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-                        {
-                            fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
-                                    outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
-                                    inner_item->op_, inner_item->temp.tp_name, 
-                                    inner_item->temp.sizeof_op,
-                                    inner_item->temp.diff);
-                            fflush(bookkeep_args->fd);
-                        }
-                    }
-                }
-                HASH_ITER(hh, allHeats, outter_item, tmp_outter)
-                {
-                    HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-                    {
-                        HASH_DEL(outter_item->curTimeObjHeat, inner_item);
-                        free(inner_item->temp.tp_name);
-                        free(inner_item);
-                    }
-                    HASH_DEL(allHeats, outter_item);
-                    free(outter_item);
-                }
-                cur_buff_count = 0;
-            }
-        }
-        // fprintf(stderr, "flush the remaining...\n");
-        // fflush(stderr);
-        if (doIO_) {
-            HASH_ITER(hh, allHeats, outter_item, tmp_outter)
-            {
-                HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-                {
-                    fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
-                            outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
-                            inner_item->op_, inner_item->temp.tp_name, 
-                            inner_item->temp.sizeof_op,
-                            inner_item->temp.diff);
-                    fflush(bookkeep_args->fd);
-                }
-            }
-        }
-        HASH_ITER(hh, allHeats, outter_item, tmp_outter)
-        {
-            HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
-            {
-                HASH_DEL(outter_item->curTimeObjHeat, inner_item);
-                free(inner_item->temp.tp_name);
-                free(inner_item);
-            }
-            HASH_DEL(allHeats, outter_item);
-            free(outter_item);
-        }
-        terminate_flag_dummy = 0;
-        fprintf(stderr, "finish bookkeeping, shutdown\n");
+        //         curTimeObjHeat->op_ = cur_pyobj->op;
+        //         HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
+        //         cur_buff_count += 1;
+        //         // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
+        //         //     break;
+        //         // }
+        //     }
+        //     #endif
+        //     #ifdef Py_TRACE_REFS
+        //     // in this case the prev_cnt is stored in PyObject, not in PyObjHM
+        //     for (op = refchain._ob_next; op != &refchain && op != NULL; op = op->_ob_next) {
+        //         CurTimeObjHeat *curTimeObjHeat = malloc(sizeof(*curTimeObjHeat));
+        //         curTimeObjHeat->temp.diff = op->ob_refcnt - op->prev_refcnt;
+        //         // curTimeObjHeat->temp.sizeof_op = _PySys_GetSizeOf(op);  // must hold GIL
+        //         curTimeObjHeat->temp.sizeof_op = 0;
+        //         char *tp_name_str;
+        //         if (op->ob_type) {
+        //             tp_name_str = op->ob_type->tp_name;
+        //         } else {
+        //             tp_name_str = "type_dealloced";
+        //         }
+        //         curTimeObjHeat->temp.tp_name = (char *)malloc(strlen(tp_name_str) + 1);  // +1 for the null terminator
+        //         strcpy(curTimeObjHeat->temp.tp_name, tp_name_str);
+        //         curTimeObjHeat->op_ = op;
+        //         HASH_ADD_PTR(allHeats->curTimeObjHeat, op_, curTimeObjHeat);
+        //         cur_buff_count += 1;
+        //         // if (++cur_obj_cnt >= rounded_num_I_want_to_count) {
+        //         //     break;
+        //         // }
+        //     }
+        //     #endif
+        //     // PyGILState_Release(gstate);
+        //     // unsigned int num_samples = HASH_COUNT(allHeats);
+        //     if (cur_buff_count > buff_size)
+        //     {
+        //         if (doIO_) {
+        //             fprintf(stderr, "doing IO...\n");
+        //             fflush(stderr);
+        //             HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+        //             {
+        //                 HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //                 {
+        //                     fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
+        //                             outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
+        //                             inner_item->op_, inner_item->temp.tp_name, 
+        //                             inner_item->temp.sizeof_op,
+        //                             inner_item->temp.diff);
+        //                     fflush(bookkeep_args->fd);
+        //                 }
+        //             }
+        //         }
+        //         HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+        //         {
+        //             HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //             {
+        //                 HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+        //                 free(inner_item->temp.tp_name);
+        //                 free(inner_item);
+        //             }
+        //             HASH_DEL(allHeats, outter_item);
+        //             free(outter_item);
+        //         }
+        //         cur_buff_count = 0;
+        //     }
+        // }
+        // // fprintf(stderr, "flush the remaining...\n");
+        // // fflush(stderr);
+        // if (doIO_) {
+        //     HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+        //     {
+        //         HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //         {
+        //             fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%s\t%zu\t%ld\n",
+        //                     outter_item->ts.tv_sec, outter_item->ts.tv_nsec, 
+        //                     inner_item->op_, inner_item->temp.tp_name, 
+        //                     inner_item->temp.sizeof_op,
+        //                     inner_item->temp.diff);
+        //             fflush(bookkeep_args->fd);
+        //         }
+        //     }
+        // }
+        // HASH_ITER(hh, allHeats, outter_item, tmp_outter)
+        // {
+        //     HASH_ITER(hh, outter_item->curTimeObjHeat, inner_item, tmp_inner)
+        //     {
+        //         HASH_DEL(outter_item->curTimeObjHeat, inner_item);
+        //         free(inner_item->temp.tp_name);
+        //         free(inner_item);
+        //     }
+        //     HASH_DEL(allHeats, outter_item);
+        //     free(outter_item);
+        // }
+        // terminate_flag_dummy = 0;
+        // fprintf(stderr, "finish bookkeeping, shutdown\n");
     }
 
 #ifdef __cplusplus

@@ -77,6 +77,18 @@
 #if defined(PYMALLOC_DEBUG) && !defined(WITH_PYMALLOC)
 #error "PYMALLOC_DEBUG requires WITH_PYMALLOC"
 #endif
+
+
+#include "ptr_szidx.h"
+extern ptr_szidx_table *tbl;
+// #undef CUCKOO_TABLE_NAME
+// #undef CUCKOO_KEY_TYPE
+// #undef CUCKOO_MAPPED_TYPE
+// #include "allHeats.h"
+// #undef CUCKOO_TABLE_NAME
+// #undef CUCKOO_KEY_TYPE
+// #undef CUCKOO_MAPPED_TYPE
+// #include "curHeats.h"
 #include "pymath.h"
 #include "pytime.h"
 #include "pymem.h"
@@ -154,6 +166,5 @@
 #include "fileutils.h"
 #include "pyfpe.h"
 #include "tracemalloc.h"
-#include "ptr_szidx.h"
 
 #endif /* !Py_PYTHON_H */

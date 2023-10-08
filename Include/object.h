@@ -157,29 +157,29 @@ whose size is determined when the object is allocated.
     }
 #define Py_SET_SIZE(ob, size) _Py_SET_SIZE(_PyVarObject_CAST(ob), size)
 #include "uthash.h"
-    typedef struct
-    {
-        // unsigned long inc_diff;
-        // unsigned long dec_diff;
-        long diff;
-        char *tp_name;
-        size_t sizeof_op;
-    } Temperature;
+    // typedef struct
+    // {
+    //     // unsigned long inc_diff;
+    //     // unsigned long dec_diff;
+    //     long diff;
+    //     char *tp_name;
+    //     size_t sizeof_op;
+    // } Temperature;
 
     // /* hash of hashes */
-    typedef struct
-    {
-        PyObject *op_;     // key
-        Temperature temp; // value
-        UT_hash_handle hh;
-    } CurTimeObjHeat;
+    // typedef struct
+    // {
+    //     PyObject *op_;     // key
+    //     Temperature temp; // value
+    //     UT_hash_handle hh;
+    // } CurTimeObjHeat;
 
-    typedef struct
-    {
-        struct timespec ts;             // key
-        CurTimeObjHeat *curTimeObjHeat; // value
-        UT_hash_handle hh;
-    } RefTrackHeatmapHash;
+    // typedef struct
+    // {
+    //     struct timespec ts;             // key
+    //     CurTimeObjHeat *curTimeObjHeat; // value
+    //     UT_hash_handle hh;
+    // } RefTrackHeatmapHash;
     typedef struct
     {
         unsigned int sample_dur;
@@ -188,23 +188,23 @@ whose size is determined when the object is allocated.
         unsigned int doIO;
         Py_ssize_t gen;
     } BookkeepArgs;
-    typedef struct
-    {
-        PyObject *op; /* key */
-        volatile Py_ssize_t prev_refcnt;
-        // Py_ssize_t dummy_value; /* value */
-        UT_hash_handle hh;
-    } PyObjHM;
-    extern PyObjHM *allPyObjHM;
-    extern RefTrackHeatmapHash *allHeats;
+    // typedef struct
+    // {
+    //     PyObject *op; /* key */
+    //     volatile Py_ssize_t prev_refcnt;
+    //     // Py_ssize_t dummy_value; /* value */
+    //     UT_hash_handle hh;
+    // } PyObjHM;
+    // extern PyObjHM *allPyObjHM;
+    // extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
-    extern volatile short terminate_flag_dummy;
+    // extern volatile short terminate_flag_dummy;
     extern volatile unsigned int total_num_objs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
     PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
-    PyAPI_FUNC(void *) test_thread_func(void *arg);
-    PyAPI_DATA(volatile short) terminate_flag_dummy;
+    // PyAPI_FUNC(void *) test_thread_func(void *arg);
+    // PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(volatile unsigned int) total_num_objs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
 

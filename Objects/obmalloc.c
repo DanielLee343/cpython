@@ -1586,6 +1586,7 @@ allocate_from_new_pool(uint size)
    requests, on error in the code below (as a last chance to serve the request)
    or when the max memory limit has been reached.
 */
+
 static inline void*
 pymalloc_alloc(void *ctx, size_t nbytes)
 {
@@ -1629,15 +1630,30 @@ pymalloc_alloc(void *ctx, size_t nbytes)
          */
         bp = allocate_from_new_pool(size);
     }
+    size_t actual_bytes = INDEX2SIZE(size);
+    // printf("szidx is %u, requested bytes is %zu, given block size is %zu\n", size, nbytes, actual_bytes);
+    uintptr_t bp_casted = (uintptr_t)bp;
+    // size_t dummy_szidx;
+    // if ( ptr_szidx_table_find(tbl, &bp_casted, &dummy_szidx)) {
+    //     printf("duped: %p\n", bp);
+    // }
+    ptr_szidx_table_insert(tbl, &bp_casted, &actual_bytes); //size is pool->szidx
+    // printf("inserted %p\n", (void *)bp);
+    // uint find_item;
+    // if (ptr_szidx_table_find(tbl, &bp_casted, &find_item)) {
+    //     printf("%p  %u\n", (void *)bp_casted, find_item);
+    // } else {
+    //     printf("%p  NOT FOUND\n", (void *)bp_casted);
+    // }
     // PyObject *casted_bp = (PyObject *)bp;
     // if(casted_bp->ob_type != NULL) { // already populated, no need
-        // fprintf(stderr, "%u \n", casted_bp->szidx);
-        // fprintf(stderr, "offsetof szidx is: %zu\n", offsetof(PyObject, szidx)); //24
-        // *((char*)casted_bp + 24) = 10; // wrong
-        // casted_bp->szidx =  0xffff; // wrong
+    //     fprintf(stderr, "%u \n", casted_bp->szidx);
+    //     fprintf(stderr, "offsetof szidx is: %zu\n", offsetof(PyObject, szidx)); //24
+    //     *((char*)casted_bp + 24) = 10; // wrong
+    //     casted_bp->szidx =  0xffff; // wrong
     // } 
     // else {
-        // casted_bp->szidx = 10;
+    //     casted_bp->szidx = 10;
     // }
     // if (casted_bp)
     return (void *)bp; //&bp
@@ -1653,6 +1669,12 @@ _PyObject_Malloc(void *ctx, size_t nbytes)
     }
 
     ptr = PyMem_RawMalloc(nbytes);
+    uintptr_t bp_casted = (uintptr_t)ptr;
+    // size_t dummy_szidx;
+    // if ( ptr_szidx_table_find(tbl, &bp_casted, &dummy_szidx)) {
+    //     printf("duped: %p\n", ptr);
+    // }
+    ptr_szidx_table_insert(tbl, &bp_casted, &nbytes); //size is pool->szidx
     if (ptr != NULL) {
         raw_allocated_blocks++;
     }
@@ -1671,8 +1693,13 @@ _PyObject_Calloc(void *ctx, size_t nelem, size_t elsize)
         memset(ptr, 0, nbytes);
         return ptr;
     }
-
     ptr = PyMem_RawCalloc(nelem, elsize);
+    uintptr_t bp_casted = (uintptr_t)ptr;
+    // size_t dummy_szidx;
+    // if ( ptr_szidx_table_find(tbl, &bp_casted, &dummy_szidx)) {
+    //     printf("duped: %p\n", ptr);
+    // }
+    ptr_szidx_table_insert(tbl, &bp_casted, &nbytes); //size is pool->szidx
     if (ptr != NULL) {
         raw_allocated_blocks++;
     }
