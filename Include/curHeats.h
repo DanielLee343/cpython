@@ -5,7 +5,6 @@ typedef struct
 {
     long diff;
     unsigned int cur_sizeof;
-    uint8_t gc_tracked;
 } Temperature;
 
 #define CUCKOO_TABLE_NAME cur_heats_table

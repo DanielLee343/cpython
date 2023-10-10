@@ -1633,10 +1633,6 @@ pymalloc_alloc(void *ctx, size_t nbytes)
     size_t actual_bytes = INDEX2SIZE(size);
     // printf("szidx is %u, requested bytes is %zu, given block size is %zu\n", size, nbytes, actual_bytes);
     uintptr_t bp_casted = (uintptr_t)bp;
-    // size_t dummy_szidx;
-    // if ( ptr_szidx_table_find(tbl, &bp_casted, &dummy_szidx)) {
-    //     printf("duped: %p\n", bp);
-    // }
     ptr_szidx_table_insert(tbl, &bp_casted, &actual_bytes); //size is pool->szidx
     // printf("inserted %p\n", (void *)bp);
     // uint find_item;

@@ -123,7 +123,6 @@ whose size is determined when the object is allocated.
     {
         PyObject ob_base;
         Py_ssize_t ob_size; /* Number of items in variable part */
-        Py_ssize_t ob_sizeof;
     } PyVarObject;
 
 /* Cast argument to PyVarObject* type. */

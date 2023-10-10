@@ -247,8 +247,8 @@ PyDoc_STRVAR(gc_get_objects__doc__,
 
 static PyObject *
 gc_get_objects_impl(PyObject *module, Py_ssize_t generation);
-PyObject *
-gc_get_objects_impl_no_mod(Py_ssize_t generation);
+void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table_locked_table *cur_op_gc_locked_table);
+PyObject * gc_get_objects_impl_no_mod(Py_ssize_t generation);
 
 static PyObject *
 gc_get_objects(PyObject *module, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)

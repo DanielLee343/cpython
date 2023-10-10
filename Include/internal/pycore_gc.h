@@ -190,7 +190,8 @@ extern "C"
     // };
 
     PyAPI_FUNC(void) _PyGC_InitState(struct _gc_runtime_state *);
-    PyAPI_FUNC(PyObject *) gc_get_objects_impl_no_mod(Py_ssize_t generation);
+    // PyAPI_FUNC(PyObject *) gc_get_objects_impl_no_mod(Py_ssize_t generation);
+    // PyAPI_FUNC(void) gc_get_objects_impl_no_mod(Py_ssize_t generation, op_gc_table_locked_table *cur_op_gc_locked_table);
     
     // extern RefTrackHeatmapHash *allHeats_GC_list;
     extern volatile short terminate_flag;
@@ -205,6 +206,7 @@ extern "C"
     extern void _PyDict_ClearFreeList(void);
     extern void _PyAsyncGen_ClearFreeLists(void);
     extern void _PyContext_ClearFreeList(void);
+    
 
 #ifdef __cplusplus
 }
