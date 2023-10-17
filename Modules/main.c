@@ -30,7 +30,7 @@ extern "C"
 #endif
 
     /* --- pymain_init() ---------------------------------------------- */
- ptr_szidx_table *tbl;
+//  ptr_szidx_table *tbl;
         
     static PyStatus
     pymain_init(const _PyArgv *args)
@@ -69,7 +69,7 @@ extern "C"
         {
             goto done;
         }
-        tbl = ptr_szidx_table_init(0);
+        // tbl = ptr_szidx_table_init(0);
         // ptr_szidx_table_free(tbl);
         status = Py_InitializeFromConfig(&config);
         if (_PyStatus_EXCEPTION(status))
@@ -752,7 +752,7 @@ extern "C"
             exitcode = 120;
         }
         pymain_free();
-        ptr_szidx_table_free(tbl);
+        // ptr_szidx_table_free(tbl);
 
         if (_Py_UnhandledKeyboardInterrupt)
         {

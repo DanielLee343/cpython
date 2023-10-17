@@ -8,7 +8,7 @@ typedef struct
 } Temperature;
 
 #define CUCKOO_TABLE_NAME cur_heats_table
-#define CUCKOO_KEY_TYPE void *
+#define CUCKOO_KEY_TYPE uintptr_t
 #define CUCKOO_MAPPED_TYPE Temperature
 #include <libcuckoo-c/cuckoo_table_template.h>
 

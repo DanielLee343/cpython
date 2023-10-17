@@ -190,7 +190,7 @@ extern "C"
     // };
 
     PyAPI_FUNC(void) _PyGC_InitState(struct _gc_runtime_state *);
-    // PyAPI_FUNC(PyObject *) gc_get_objects_impl_no_mod(Py_ssize_t generation);
+    PyAPI_FUNC(PyObject *) gc_get_objects_impl_no_mod(Py_ssize_t generation);
     // PyAPI_FUNC(void) gc_get_objects_impl_no_mod(Py_ssize_t generation, op_gc_table_locked_table *cur_op_gc_locked_table);
     
     // extern RefTrackHeatmapHash *allHeats_GC_list;

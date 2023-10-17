@@ -379,10 +379,10 @@ static int
 append_objects(PyObject *py_list, PyGC_Head *gc_list)
 {
     PyGC_Head *gc;
-    int cur_gen_size = 0;
+    // int cur_gen_size = 0;
     for (gc = GC_NEXT(gc_list); gc != gc_list; gc = GC_NEXT(gc))
     {
-        cur_gen_size++;
+        // cur_gen_size++;
         PyObject *op = FROM_GC(gc);
         if (op != py_list){
             if (PyList_Append(py_list, op))
@@ -391,68 +391,89 @@ append_objects(PyObject *py_list, PyGC_Head *gc_list)
             }
         }
     }
-    printf(stderr, "cur size append_objects: %d\n", cur_gen_size);
+    // fprintf(stderr, "cur size append_objects: %d\n", cur_gen_size);
     return 0;
 }
 
 /* for each potential iterable, recursively check if reaching non-iterable */
-void update_recursive(PyObject *each_op, op_gc_table_locked_table *cur_op_gc_locked_table)
+void update_recursive(PyObject *each_op, op_gc_table *table)
 {
-    // if (strcmp(each_op->ob_type->tp_name, "method") == 0) {
-    // if (PyMethod_Check(each_op)) {
-    //     fprintf(stderr, "gotcha, method type %p\n", each_op);
-    //     return;
-    // }
-    // if (PyList_Check(each_op)) {
-    //     fprintf(stderr, "It's a list inner, %p\n", each_op);
-    //     PyObject_Print(each_op, stderr, 1);
-    //     fprintf(stderr, "\n");
-    // } else {
-    //     printf("It's not a list inner.\n");
-    // }
-    each_op->prev_refcnt = each_op->ob_refcnt;
-    uint8_t gc_traced = 0;
-    // if (_PyObject_IS_GC(each_op)) { // this line segfaults when gen == 0, why??
-    //     if (_PyObject_GC_IS_TRACKED(each_op)) {
-    //         gc_traced = 1;
-    //     }
-    // }
+    uint8_t potential_value;
     uintptr_t each_op_casted = (uintptr_t)each_op;
+    potential_value = 1;
+    op_gc_table_insert(table, &each_op_casted, &potential_value);
+    each_op->prev_refcnt = each_op->ob_refcnt;
+
+    PyObject *iterable = PyObject_GetIter(each_op);
+    if (!iterable) {
+        // PyErr_Clear();
+        return;
+    }
+    PyObject *inner_op;
+    while ((inner_op = PyIter_Next(iterable))) {
+        uintptr_t inner_op_casted = (uintptr_t)inner_op;
+        uint8_t dummy_val;
+        if(op_gc_table_find(table, &inner_op_casted, &dummy_val)){
+            // fprintf(stderr, "found dupped %p\n", inner_op);
+            continue;
+        }
+        update_recursive(inner_op, table);
+        Py_DECREF(inner_op);
+    }
+    Py_DECREF(iterable);
+    return;
     // uint8_t potent_value;
     // if (op_gc_table_locked_table_find(cur_op_gc_locked_table, &each_op_casted, &potent_value)) {
     //     fprintf(stderr, "found dupped %p\n", each_op);
     // }
-    op_gc_table_locked_table_insert(cur_op_gc_locked_table, &each_op_casted, &gc_traced, NULL);// TODO: make sure not overwritten, but I'm 99% np
-    PyObject *iterable = PyObject_GetIter(each_op);
-    if (iterable) {
-        Py_ssize_t cur_size = PyList_Size(each_op);
-        for(Py_ssize_t i = 0; i < cur_size; i++){
-            PyObject *inner_op = PyList_GetItem(each_op, i);
-            update_recursive(inner_op, cur_op_gc_locked_table);
-        }
-    }
+    // op_gc_table_locked_table_insert(cur_op_gc_locked_table, &each_op_casted, &gc_traced, NULL);// TODO: make sure not overwritten, but I'm 99% np
+    // PyObject *iterable = PyObject_GetIter(each_op);
+    // if (iterable) {
+    //     Py_ssize_t cur_size = PyList_Size(each_op);
+    //     for(Py_ssize_t i = 0; i < cur_size; i++){
+    //         PyObject *inner_op = PyList_GetItem(each_op, i);
+    //         update_recursive(inner_op, cur_op_gc_locked_table);
+    //     }
+    // }
 }
 /* list version of cascade tracing */
-static int update_recursive_list(PyObject *each_op, PyObject *py_list)
+void update_recursive_list(PyObject *each_op, PyObject *py_list, op_gc_table *cur_op_gc_table)
 {
+    uint8_t potential_value;
+    uintptr_t each_op_casted = (uintptr_t)each_op;
+    potential_value = 1;
+    op_gc_table_insert(cur_op_gc_table, &each_op_casted, &potential_value);
     each_op->prev_refcnt = each_op->ob_refcnt;
     if (PyList_Append(py_list, each_op))
     {
-        return -1; /* exception */
+        fprintf(stderr, "append error %p\n", each_op);
+        return;
     }
     PyObject *iterable = PyObject_GetIter(each_op);
-    if (iterable) {
-        Py_ssize_t cur_size = PyList_Size(each_op);
-        for(Py_ssize_t i = 0; i < cur_size; i++){
-            PyObject *inner_op = PyList_GetItem(each_op, i);
-            update_recursive_list(inner_op, py_list);
-        }
+    if (!iterable) {
+        // PyErr_Clear();
+        return;
     }
-    return 0;
+    PyObject *inner_op;
+    while ((inner_op = PyIter_Next(iterable))) {
+    // Py_ssize_t cur_size = PyList_Size(each_op);
+    // for(Py_ssize_t i = 0; i < cur_size; i++){
+        // PyObject *inner_op = PyList_GetItem(each_op, i);
+        uintptr_t inner_op_casted = (uintptr_t)inner_op;
+        uint8_t dummy_val;
+        if (op_gc_table_find(cur_op_gc_table, &inner_op_casted, &dummy_val)) {
+            // fprintf(stderr, "found dupped %p\n", each_op);
+            continue;
+        }
+        update_recursive_list(inner_op, py_list, cur_op_gc_table);
+        Py_DECREF(inner_op);
+    }
+    Py_DECREF(iterable);
+    return;
 }
 
 static int
-append_objects_op_gc(PyGC_Head *gc_list, op_gc_table_locked_table *cur_op_gc_locked_table)
+append_objects_op_gc(PyGC_Head *gc_list, op_gc_table *table)
 {
     PyGC_Head *gc;
     int cur_gen_size = 0;
@@ -460,40 +481,33 @@ append_objects_op_gc(PyGC_Head *gc_list, op_gc_table_locked_table *cur_op_gc_loc
     {
         cur_gen_size++;
         PyObject *container_op = FROM_GC(gc);
-        // if (PyList_Check(container_op)) {
-        //     printf("It's a list111!\n");
-        //     PyObject_Print(container_op, stderr, 1);
-        //     fprintf(stderr, "\n");
-        // } else {
-        //     printf("It's not a list111.\n");
-        // }
-        update_recursive(container_op, cur_op_gc_locked_table); // op for certain is container object
+        update_recursive(container_op, table); // op for certain is container object
     }
     fprintf(stderr, "cur size append_objects_op_gc: %d\n", cur_gen_size);
     return 0;
 }
 
 static int
-append_objects_list(PyObject *py_list, PyGC_Head *gc_list)
+append_objects_list(PyObject *py_list, PyGC_Head *gc_list, op_gc_table *cur_op_gc_table)
 {
     PyGC_Head *gc;
-    int cur_gen_size = 0;
+    // int cur_gen_size = 0;
     for (gc = GC_NEXT(gc_list); gc != gc_list; gc = GC_NEXT(gc))
     {
         PyObject *container_op = FROM_GC(gc);
         if (container_op != py_list){
-            cur_gen_size++;
+            // cur_gen_size++;
             // if (PyList_Append(py_list, container_op))
             // {
             //     return -1; /* exception */
             // }
-            update_recursive_list(container_op, py_list);  // op for certain is container object
+            update_recursive_list(container_op, py_list, cur_op_gc_table);  // op for certain is container object
             // {
             //     return -1;
             // }
         }
     }
-    fprintf(stderr, "cur size append_objects_list: %d\n", cur_gen_size);
+    // fprintf(stderr, "cur size append_objects_list: %d\n", cur_gen_size);
     return 0;
 }
 
@@ -2113,6 +2127,7 @@ PyObject * gc_get_objects_impl_no_mod(Py_ssize_t generation)
     }
 
     result = PyList_New(0);
+    op_gc_table *cur_op_gc_table = op_gc_table_init(0);
     if (result == NULL)
     {
         return NULL;
@@ -2136,7 +2151,7 @@ PyObject * gc_get_objects_impl_no_mod(Py_ssize_t generation)
             goto error;
         }
 
-        if (append_objects_list(result, GEN_HEAD(gcstate, generation)))
+        if (append_objects_list(result, GEN_HEAD(gcstate, generation), cur_op_gc_table))
         {
             goto error;
         }
@@ -2145,20 +2160,22 @@ PyObject * gc_get_objects_impl_no_mod(Py_ssize_t generation)
     /* If generation is not passed or None, get all objects from all generations */
     for (i = 0; i < NUM_GENERATIONS; i++)
     {
-        if (append_objects_list(result, GEN_HEAD(gcstate, i)))
+        if (append_objects_list(result, GEN_HEAD(gcstate, i), cur_op_gc_table))
         {
             goto error;
         }
     }
+    op_gc_table_free(cur_op_gc_table);
     return result;
 
 error:
     fprintf(stderr, "error occured\n");
+    op_gc_table_free(cur_op_gc_table);
     Py_DECREF(result);
     return NULL;
 }
 
-void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table_locked_table *cur_op_gc_locked_table)
+void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table *table)
 {
     PyThreadState *tstate = _PyThreadState_GET();
     int i;
@@ -2183,7 +2200,7 @@ void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table_locked_table *
             goto error;
         }
         fprintf(stderr, "inspecting generation %zu\n", generation);
-        if (append_objects_op_gc(GEN_HEAD(gcstate, generation), cur_op_gc_locked_table))
+        if (append_objects_op_gc(GEN_HEAD(gcstate, generation), table))
         {
             goto error;
         }
@@ -2193,11 +2210,10 @@ void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table_locked_table *
     for (i = 0; i < NUM_GENERATIONS; i++)
     {
         fprintf(stderr, "inspecting generation %d\n", i);
-        if (append_objects_op_gc(GEN_HEAD(gcstate, i), cur_op_gc_locked_table))
+        if (append_objects_op_gc(GEN_HEAD(gcstate, i), table))
         {
             goto error;
         }
-        // break;
     }
     return;
 
@@ -2211,7 +2227,7 @@ void *thread_trace_from_gc_list(void *arg)
         Larger # objs trace more frequently?? ie correlation btw obj lifetime VS obj hotness */
     fprintf(stderr, "start bookkeep thread\n");
     BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-    unsigned int cur_buff_count;
+    // unsigned int cur_buff_count;
     unsigned int buff_size = bookkeep_args->buff_size;
     fprintf(stderr, "buff_size is %d\n", buff_size);
     if (buff_size == 0)
@@ -2223,11 +2239,11 @@ void *thread_trace_from_gc_list(void *arg)
     {
         perror("Failed to find fd passed in\n");
     }
-    if (bookkeep_args->sample_dur == 0)
-    {
-        fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
-        bookkeep_args->sample_dur = 500000;
-    }
+    // if (bookkeep_args->sample_dur == 0)
+    // {
+    //     fprintf(stderr, "missing sample_dur, setting to 1ms\n");
+    //     bookkeep_args->sample_dur = 1000;
+    // }
 
     all_heats_table *allHeats = all_heats_table_init(0);
     all_heats_table_locked_table *allHeats_locked = all_heats_table_lock_table(allHeats);
@@ -2237,36 +2253,35 @@ void *thread_trace_from_gc_list(void *arg)
     unsigned int doIO_ = bookkeep_args->doIO;
     // RefTrackHeatmapHash *outter_item, *tmp_outter;
     // CurTimeObjHeat *inner_item, *tmp_inner;
+    int rescan_thresh = 5;
+    int cur_scan_idx = 0;
+    struct timespec ts;
     while (!terminate_flag)
     {
         PyGILState_STATE gstate = PyGILState_Ensure();
         op_gc_table *cur_op_gc_table = op_gc_table_init(0); // TODO: remember to free this, for each bk loop
-        op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table); // free this also
+        
         clock_t start_time, end_time;
         double execution_time;
         start_time = clock();
 
-        gc_get_objects_impl_op_gc(bookkeep_args->gen, cur_op_gc_locked_table); // generation index, [-1, 0, 1, 2], where -1 means all generations
+        gc_get_objects_impl_op_gc(bookkeep_args->gen, cur_op_gc_table); // generation index, [-1, 0, 1, 2], where -1 means all generations
+        op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table); // for iterating, remember to free this!
         // PyObject *cur_list_from_GC = gc_get_objects_impl_no_mod(bookkeep_args->gen); // PyList version
         // Py_ssize_t list_size = PyList_Size(cur_list_from_GC);
         // fprintf(stderr, "current size is %zu\n", list_size);
         
         end_time = clock();
         execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-        fprintf(stderr, "update prev_cnt time: %.3f seconds\n", execution_time);
-        fprintf(stderr, "cur_op_gc_table locked size is: %zu\n", op_gc_table_locked_table_size(cur_op_gc_locked_table));
-
+        fprintf(stderr, "update prev_cnt time: %.3f seconds, size is: %zu\n", execution_time, op_gc_table_locked_table_size(cur_op_gc_locked_table));
 
         Py_BEGIN_ALLOW_THREADS
             usleep(bookkeep_args->sample_dur);
         Py_END_ALLOW_THREADS
         PyGILState_Release(gstate);
-        // the following we don't need to hold the lock
-        struct timespec ts;
+        
         clock_gettime(CLOCK_MONOTONIC, &ts);
         outter_key_wrapper.ts = ts;
-        // fprintf(stderr, "current time: %ld:%ld\n", outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec);
-        // init curHeats table
         curHeats = cur_heats_table_init(0);
         curHeats_locked = cur_heats_table_lock_table(curHeats);
         uintptr_t curHeats_locked_casted = (uintptr_t)curHeats_locked;
@@ -2277,10 +2292,10 @@ void *thread_trace_from_gc_list(void *arg)
 
         op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
         op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
-        void *each_op;
+        uintptr_t each_op;
         uint8_t gc_traced;
         for (; !op_gc_table_iterator_equal (op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it)) {
-            each_op = *op_gc_table_iterator_key(op_gc_it);
+            each_op = *op_gc_table_iterator_key(op_gc_it); // each_op is uintptr_t type
             PyObject *op = (PyObject *)each_op;
             /* print traced objects for debugging */
             // if (PyList_Check(op)) {
@@ -2293,31 +2308,34 @@ void *thread_trace_from_gc_list(void *arg)
             //     fprintf(stderr, "\n");
             // }
             temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
+            temp.cur_sizeof = 0;
             uintptr_t op_w_gc_casted;
             /* here we must differenciate op whether it contains PyGC_HEAD,
                 from the hashtable already populated,
                 because in pymalloc_alloc(), ptr includes PyGC_HEAD for PyVarObject */
-            if (_PyObject_IS_GC(each_op)) { // this line segfaults when gen == 0, why??
-                if (_PyObject_GC_IS_TRACKED(each_op)) {
-                    op_w_gc_casted = (uintptr_t)AS_GC(op);
-                }
-            } else {
-                op_w_gc_casted = (uintptr_t)op;
-            }
+            // if (_PyObject_IS_GC(each_op)) { // this line segfaults when gen == 0, why??
+            //     if (_PyObject_GC_IS_TRACKED(each_op)) {
+            //         op_w_gc_casted = (uintptr_t)AS_GC(op);
+            //     }
+            // } else {
+            //     op_w_gc_casted = (uintptr_t)op;
+            // }
+            cur_heats_table_locked_table_insert(curHeats_locked, &each_op, &temp, NULL);
+            // cur_buff_count++;
             // gc_traced = *op_gc_table_iterator_mapped(op_gc_it);
             // if (gc_traced) {
             //     op_w_gc_casted = (uintptr_t)AS_GC(op);
             // } else {
             //     op_w_gc_casted = (uintptr_t)op;
             // }
-            if (ptr_szidx_table_find(tbl, &op_w_gc_casted, &foundSizeof)) {
-                temp.cur_sizeof = foundSizeof;
-                cur_heats_table_locked_table_insert(curHeats_locked, (void *)op_w_gc_casted, &temp, NULL);
-                cur_buff_count++;
-            } else {
-                fprintf(stderr, "not found %p, type is %s\n", op, op->ob_type->tp_name);
-            }
-        }
+            // if (ptr_szidx_table_find(tbl, &op_w_gc_casted, &foundSizeof)) {
+            //     temp.cur_sizeof = foundSizeof;
+            //     cur_heats_table_locked_table_insert(curHeats_locked, (void *)op_w_gc_casted, &temp, NULL);
+            //     cur_buff_count++;
+            // } else {
+            //     fprintf(stderr, "not found %p, type is %s\n", op, op->ob_type->tp_name);
+            // }
+        } // loop to insert records
         
         // uintptr_t op_w_gc_casted;
         // for (Py_ssize_t i = 0; i < list_size; i++) {
@@ -2398,28 +2416,45 @@ void *thread_trace_from_gc_list(void *arg)
         // }
         /* must free cur_list_from_GC, 
             otherwise next tracing loop will count the current loop's gc list! */
-       
         // if (cur_buff_count > buff_size)
-        // {
-        //     if (doIO_) {
-        //         fprintf(stderr, "doing IO...\n");
-        //         // fflush(stderr);
-        //         uintptr_t foundOtter;
-        //         // iterate allHeats table
-        //         all_heats_table_iterator *allHeats_it = all_heats_table_locked_table_begin(allHeats_locked);
-        //         all_heats_table_iterator *allHeats_end = all_heats_table_locked_table_end(allHeats_locked);
-        //         for (; !all_heats_table_iterator_equal(allHeats_it, allHeats_end);
-        //             all_heats_table_iterator_increment(allHeats_it)){
-        //                 outter_key_wrapper = *all_heats_table_iterator_key(allHeats_it);
-        //                 foundOtter = *all_heats_table_iterator_mapped(allHeats_it);
-        //                 fprintf(stderr, "found otter K.sec: %ld, V: %ld\n", outter_key_wrapper.ts.tv_sec, foundOtter);
-        //             }
-        //             cur_heats_table_iterator *curHeats_it = cur_heats_table_locked_table_begin((cur_heats_table_locked_table *)foundOtter);
-        //             cur_heats_table_iterator *curHeats_end = cur_heats_table_locked_table_end((cur_heats_table_locked_table *)foundOtter);
-        //     }
-        //     cur_buff_count = 0;
-        // }
+        {
+            if (doIO_) {
+                cur_heats_table_iterator *curHeats_it, *curHeats_end;
+                start_time = clock();
+                uintptr_t foundInner;
+                fprintf(stderr, "doing IO...\n");
+                // fflush(stderr);
+                // uintptr_t foundOtter;
+                // iterate allHeats table
+                // allHeats_it = all_heats_table_locked_table_begin(allHeats_locked);
+                // allHeats_end = all_heats_table_locked_table_end(allHeats_locked);
+                // for (; !all_heats_table_iterator_equal(allHeats_it, allHeats_end);
+                // all_heats_table_iterator_increment(allHeats_it)){
+                //     outter_key_wrapper = *all_heats_table_iterator_key(allHeats_it);
+                //     foundOtter = *all_heats_table_iterator_mapped(allHeats_it);
+                //     fprintf(bookkeep_args->fd, "found otter K.sec: %ld, V: %ld\n", outter_key_wrapper.ts.tv_sec, foundOtter);
+                curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
+                curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
+                for(; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
+                    cur_heats_table_iterator_increment(curHeats_it)) {
+                        foundInner = *cur_heats_table_iterator_key(curHeats_it);
+                        Temperature temp = *cur_heats_table_iterator_mapped(curHeats_it);
+                        fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%ld\t%u\n", 
+                            outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec,
+                            (void *)foundInner, temp.diff, temp.cur_sizeof);
+                }
+                cur_heats_table_iterator_free(curHeats_end);
+                cur_heats_table_iterator_free(curHeats_it);
+                end_time = clock();
+                execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+                fprintf(stderr, "IO time: %.3f seconds\n", execution_time);
+            }
+        }
+        cur_heats_table_locked_table_free(curHeats_locked);
+        cur_heats_table_free(curHeats);
     }
+    all_heats_table_locked_table_free(allHeats_locked);
+    all_heats_table_free(allHeats);
     terminate_flag = 0;
     fprintf(stderr, "finish bookkeeping, shutdown\n");
 }

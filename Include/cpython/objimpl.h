@@ -66,7 +66,7 @@ _PyObject_INIT(PyObject *op, PyTypeObject *typeobj)
 {
     assert(op != NULL);
     op->prev_refcnt = 0;
-    // op->szidx = 0;
+    op->cur_op_size = 0;
     #ifdef Py_TRACE_REFS
         // op->cur_size_bytes = 0;
     #endif

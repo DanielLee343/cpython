@@ -12,6 +12,18 @@
 #include "pycore_pystate.h" // _PyThreadState_GET()
 #include "frameobject.h"
 #include "interpreteridobject.h"
+#undef CUCKOO_TABLE_NAME
+#undef CUCKOO_KEY_TYPE
+#undef CUCKOO_MAPPED_TYPE
+#include "allHeats.h"
+#undef CUCKOO_TABLE_NAME
+#undef CUCKOO_KEY_TYPE
+#undef CUCKOO_MAPPED_TYPE
+#include "curHeats.h"
+#undef CUCKOO_TABLE_NAME
+#undef CUCKOO_KEY_TYPE
+#undef CUCKOO_MAPPED_TYPE
+#include "op_gc.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -2007,7 +2019,7 @@ extern "C"
             _PyObject_ASSERT_FAILED_MSG(op,
                                         "object not found in the objects list");
         }
-#endif /*Py_TRACE_REFS*/
+#endif /* SLOW_UNREF_CHECK */
 
         op->_ob_next->_ob_prev = op->_ob_prev;
         op->_ob_prev->_ob_next = op->_ob_next;
@@ -2436,33 +2448,133 @@ extern "C"
 
 // my own tracing starts here
 // #define NUM_THREADS 1
-    // volatile short terminate_flag_dummy = 0;
+    volatile short terminate_flag_dummy = 0;
     // RefTrackHeatmapHash *allHeats = NULL;
     unsigned int SAMPLE_DUR; // sample duration, default 0.5 s
-
     void *ref_cnt_changes(void *arg)
     {
         fprintf(stderr, "start bookkeep thread\n");
-        // BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-        // unsigned int cur_buff_count;
-        // unsigned int buff_size = bookkeep_args->buff_size;
-        // // double percent_I_want_to_cnt = (double)bookkeep_args->percent_I_want_to_cnt / 100;
-        // fprintf(stderr, "buff_size is %d\n", buff_size);
-        // if (buff_size == 0)
-        // {
-        //     fprintf(stderr, "buff_size not set, setting to 1024\n");
-        //     buff_size = 5120;
-        // }
-        // if (bookkeep_args->fd == NULL)
-        // {
-        //     perror("Failed to find fd passed in\n");
-        // }
+        BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
+        unsigned int cur_buff_count;
+        unsigned int buff_size = bookkeep_args->buff_size;
+        fprintf(stderr, "buff_size is %d\n", buff_size);
+        if (buff_size == 0)
+        {
+            fprintf(stderr, "buff_size not set, setting to 1024\n");
+            buff_size = 5120;
+        }
+        if (bookkeep_args->fd == NULL)
+        {
+            perror("Failed to find fd passed in\n");
+        }
+        unsigned int doIO_ = bookkeep_args->doIO;
         // if (bookkeep_args->sample_dur == 0)
         // {
-        //     fprintf(stderr, "missing sample_dur, setting to 0.5s\n");
-        //     bookkeep_args->sample_dur = 500000;
+        //     fprintf(stderr, "missing sample_dur, setting to 1ms\n");
+        //     bookkeep_args->sample_dur = 1000;
         // }
-        // unsigned int doIO_ = bookkeep_args->doIO;
+        all_heats_table *allHeats = all_heats_table_init(0);
+        all_heats_table_locked_table *allHeats_locked = all_heats_table_lock_table(allHeats);
+        ts_blob outter_key_wrapper;
+        cur_heats_table *curHeats;
+        cur_heats_table_locked_table *curHeats_locked;
+        struct timespec ts;
+        while (!terminate_flag_dummy)
+        {
+            PyGILState_STATE gstate = PyGILState_Ensure();
+            clock_t start_time, end_time;
+            double execution_time;
+            start_time = clock();
+            PyObject *op;
+            // unsigned int cur_obj_cnt;
+            op_gc_table *cur_op_gc_table = op_gc_table_init(0);
+            uint8_t potential_value = 1;
+            for (op = refchain._ob_next; op != &refchain; op = op->_ob_next)
+            {
+                op->prev_refcnt = op->ob_refcnt;
+                // op->cur_op_size = _PySys_GetSizeOf(op);
+                // cur_obj_cnt++;
+                uintptr_t op_casted = (uintptr_t)op;
+                op_gc_table_insert(cur_op_gc_table, &op_casted, &potential_value);
+            }
+            op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table);
+            end_time = clock();
+            execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+            fprintf(stderr, "update prev_cnt time: %.3f seconds, count is %u\n", execution_time, op_gc_table_locked_table_size(cur_op_gc_locked_table));
+            Py_BEGIN_ALLOW_THREADS
+                usleep(bookkeep_args->sample_dur);
+            Py_END_ALLOW_THREADS
+            PyGILState_Release(gstate);
+
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            outter_key_wrapper.ts = ts;
+            curHeats = cur_heats_table_init(0);
+            Temperature temp;
+            size_t foundSizeof; // can be here?? make sure populated correctly, but shoudn't matter anyway
+            start_time = clock();
+            uintptr_t each_op;
+            uint8_t gc_traced;
+            op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
+            op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
+            for (op = refchain._ob_next; op != &refchain; op = op->_ob_next) // 1, this segfaults when looping
+            // for (; !op_gc_table_iterator_equal (op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it)) // 2
+            {
+                // each_op = *op_gc_table_iterator_key(op_gc_it); // 2
+                // PyObject *op = (PyObject *)each_op; // 2
+                if (op == NULL) {
+                    continue;
+                }
+                each_op = (uintptr_t)op; // 1
+                Py_ssize_t cur = op->ob_refcnt;
+                Py_ssize_t prev = op->prev_refcnt;
+                temp.diff = (long)(cur - prev);
+                // temp.cur_sizeof = (unsigned int)op->cur_op_size;
+                temp.cur_sizeof = 0;
+                cur_heats_table_insert(curHeats, &each_op, &temp);
+            }
+            
+            curHeats_locked = cur_heats_table_lock_table(curHeats);
+            uintptr_t curHeats_locked_casted = (uintptr_t)curHeats_locked;
+            all_heats_table_locked_table_insert(allHeats_locked, &outter_key_wrapper, &curHeats_locked_casted, NULL);
+
+            op_gc_table_iterator_free(op_gc_end);
+            op_gc_table_iterator_free(op_gc_it);
+            op_gc_table_locked_table_free(cur_op_gc_locked_table);
+            op_gc_table_free(cur_op_gc_table);
+
+            end_time = clock();
+            execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+            fprintf(stderr, "insert record time: %.3f seconds\n", execution_time);
+            start_time = clock();
+            { // write to file
+                if (doIO_) {
+                    cur_heats_table_iterator *curHeats_it, *curHeats_end;
+                    uintptr_t foundInner;
+                    fprintf(stderr, "doing IO...\n");
+                    curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
+                    curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
+                    for(; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
+                        cur_heats_table_iterator_increment(curHeats_it)) {
+                            foundInner = *cur_heats_table_iterator_key(curHeats_it);
+                            Temperature temp = *cur_heats_table_iterator_mapped(curHeats_it);
+                            fprintf(bookkeep_args->fd, "%ld.%ld\t%p\t%ld\t%u\n", 
+                                outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec,
+                                (void *)foundInner, temp.diff, temp.cur_sizeof);
+                    }
+                    cur_heats_table_iterator_free(curHeats_end);
+                    cur_heats_table_iterator_free(curHeats_it);
+                    end_time = clock();
+                    execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+                    fprintf(stderr, "IO time: %.3f seconds\n", execution_time);
+                }
+            }
+            cur_heats_table_locked_table_free(curHeats_locked);
+            cur_heats_table_free(curHeats);
+        }
+        all_heats_table_locked_table_free(allHeats_locked);
+        all_heats_table_free(allHeats);
+        terminate_flag_dummy = 0;
+        fprintf(stderr, "finish bookkeeping, shutdown\n");
         // RefTrackHeatmapHash *outter_item, *tmp_outter;
         // CurTimeObjHeat *inner_item, *tmp_inner;
         // while (!terminate_flag_dummy)

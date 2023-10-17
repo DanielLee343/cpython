@@ -393,7 +393,6 @@ PYTHON_OBJS=	\
 		Python/dtoa.o \
 		Python/formatter_unicode.o \
 		Python/fileutils.o \
-		Python/ptr_szidx.o \
 		Python/$(DYNLOADFILE) \
 		$(LIBOBJS) \
 		$(MACHDEP_OBJS) \
@@ -932,9 +931,6 @@ Python/compile.o Python/symtable.o Python/ast_unparse.o Python/ast.o Python/futu
 Python/getplatform.o: $(srcdir)/Python/getplatform.c
 		$(CC) -c $(PY_CORE_CFLAGS) -DPLATFORM='"$(MACHDEP)"' -o $@ $(srcdir)/Python/getplatform.c
 
-Python/ptr_szidx.o: $(srcdir)/Python/ptr_szidx.cpp
-		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/ptr_szidx.cpp
-
 Python/importdl.o: $(srcdir)/Python/importdl.c
 		$(CC) -c $(PY_CORE_CFLAGS) -I$(DLINCLDIR) -o $@ $(srcdir)/Python/importdl.c
 
@@ -1080,7 +1076,6 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/pyarena.h \
 		$(srcdir)/Include/pycapsule.h \
 		$(srcdir)/Include/pyctype.h \
-		$(srcdir)/Include/ptr_szidx.h \
 		$(srcdir)/Include/pydebug.h \
 		$(srcdir)/Include/pydtrace.h \
 		$(srcdir)/Include/pyerrors.h \

@@ -79,8 +79,8 @@
 #endif
 
 
-#include "ptr_szidx.h"
-extern ptr_szidx_table *tbl;
+// #include "ptr_szidx.h"
+// extern ptr_szidx_table *tbl;
 // #undef CUCKOO_TABLE_NAME
 // #undef CUCKOO_KEY_TYPE
 // #undef CUCKOO_MAPPED_TYPE

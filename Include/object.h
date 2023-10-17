@@ -83,7 +83,7 @@ whose size is determined when the object is allocated.
 #define PyObject_HEAD PyObject ob_base;
 
 #define PyObject_HEAD_INIT(type) \
-    {_PyObject_EXTRA_INIT 1, type, 0},
+    {_PyObject_EXTRA_INIT 1, type, 0, 0},
 
 #define PyVarObject_HEAD_INIT(type, size) \
     {PyObject_HEAD_INIT(type) size},
@@ -108,6 +108,7 @@ whose size is determined when the object is allocated.
             volatile Py_ssize_t ob_refcnt;
         PyTypeObject *ob_type;
         Py_ssize_t prev_refcnt;
+        Py_ssize_t cur_op_size;
         // uint szidx;
         // Py_ssize_t cur_inc_count; // same with ob_refcnt, but keeps increasing
         // Py_ssize_t prev_inc_count;
@@ -197,13 +198,13 @@ whose size is determined when the object is allocated.
     // extern PyObjHM *allPyObjHM;
     // extern RefTrackHeatmapHash *allHeats;
     extern unsigned int SAMPLE_DUR;
-    // extern volatile short terminate_flag_dummy;
+    extern volatile short terminate_flag_dummy;
     extern volatile unsigned int total_num_objs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
     PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
     // PyAPI_FUNC(void *) test_thread_func(void *arg);
-    // PyAPI_DATA(volatile short) terminate_flag_dummy;
+    PyAPI_DATA(volatile short) terminate_flag_dummy;
     PyAPI_DATA(volatile unsigned int) total_num_objs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
 
