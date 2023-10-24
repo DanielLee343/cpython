@@ -197,16 +197,17 @@ whose size is determined when the object is allocated.
     // } PyObjHM;
     // extern PyObjHM *allPyObjHM;
     // extern RefTrackHeatmapHash *allHeats;
-    extern unsigned int SAMPLE_DUR;
-    extern volatile short terminate_flag_dummy;
-    extern volatile unsigned int total_num_objs;
     extern BookkeepArgs bookkeepArgs;
-    PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
+    PyAPI_DATA(BookkeepArgs) bookkeepArgs;
     PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
     // PyAPI_FUNC(void *) test_thread_func(void *arg);
-    PyAPI_DATA(volatile short) terminate_flag_dummy;
-    PyAPI_DATA(volatile unsigned int) total_num_objs;
-    PyAPI_DATA(BookkeepArgs) bookkeepArgs;
+    #ifdef Py_TRACE_REFS
+        PyAPI_FUNC(void *) ref_cnt_changes(void *arg);
+        extern volatile unsigned int total_num_objs;
+        PyAPI_DATA(volatile unsigned int) total_num_objs;
+        extern volatile short terminate_flag_dummy;
+        PyAPI_DATA(volatile short) terminate_flag_dummy;
+    #endif
 
     
     // CurTimeObjHeat *curTimeObjHeat = NULL;

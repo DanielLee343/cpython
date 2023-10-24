@@ -1462,7 +1462,7 @@ main_loop:
             }
         }
 #endif
-
+        // fprintf(stderr, "opcode: %d\n", opcode);
         switch (opcode) {
 
         /* BEWARE!

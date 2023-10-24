@@ -2448,9 +2448,9 @@ extern "C"
 
 // my own tracing starts here
 // #define NUM_THREADS 1
-    volatile short terminate_flag_dummy = 0;
     // RefTrackHeatmapHash *allHeats = NULL;
-    unsigned int SAMPLE_DUR; // sample duration, default 0.5 s
+    #ifdef Py_TRACE_REFS
+    volatile short terminate_flag_dummy = 0;
     void *ref_cnt_changes(void *arg)
     {
         fprintf(stderr, "start bookkeep thread\n");
@@ -2500,7 +2500,7 @@ extern "C"
             op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table);
             end_time = clock();
             execution_time = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-            fprintf(stderr, "update prev_cnt time: %.3f seconds, count is %u\n", execution_time, op_gc_table_locked_table_size(cur_op_gc_locked_table));
+            fprintf(stderr, "update prev_cnt time: %.3f seconds, count is %lu\n", execution_time, op_gc_table_locked_table_size(cur_op_gc_locked_table));
             Py_BEGIN_ALLOW_THREADS
                 usleep(bookkeep_args->sample_dur);
             Py_END_ALLOW_THREADS
@@ -2726,7 +2726,7 @@ extern "C"
         // terminate_flag_dummy = 0;
         // fprintf(stderr, "finish bookkeeping, shutdown\n");
     }
-
+    #endif
 #ifdef __cplusplus
 }
 #endif
