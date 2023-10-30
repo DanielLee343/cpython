@@ -15,7 +15,6 @@ PyObject *
 PySeqIter_New(PyObject *seq)
 {
     seqiterobject *it;
-
     if (!PySequence_Check(seq)) {
         PyErr_BadInternalCall();
         return NULL;

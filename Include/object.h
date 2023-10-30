@@ -187,6 +187,7 @@ whose size is determined when the object is allocated.
         unsigned int buff_size;
         unsigned int doIO;
         Py_ssize_t gen;
+        int fast_scan_to_drop;
     } BookkeepArgs;
     // typedef struct
     // {
