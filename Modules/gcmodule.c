@@ -2348,7 +2348,7 @@ void *thread_trace_from_gc_list(void *arg)
     op_gc_table_locked_table *cur_op_gc_locked_table;
     uintptr_t prev_changed_max;
     uintptr_t prev_changed_min = ULONG_MAX;
-    uintptr_t no_93_upper = 93825990000000;
+    uintptr_t no_93_upper = 100000000000000;
     while (!terminate_flag)
     {
         update_prev_refcnt_start = clock();
