@@ -2323,13 +2323,16 @@ void *thread_trace_from_gc_list(void *arg)
     unsigned int doIO_ = bookkeep_args->doIO;
     // RefTrackHeatmapHash *outter_item, *tmp_outter;
     // CurTimeObjHeat *inner_item, *tmp_inner;
-    int rescan_thresh = 5; // threshold to say after how many fast scan, that we do a complete scan, not const, probably need to dynamically change later
+    int rescan_thresh = 20; // threshold to say after how many fast scan, that we do a complete scan, not const, probably need to dynamically change later
     int cur_scan_idx = 0;  // indicates how many fast scan bk thread has done, resets to zero when reaching rescan_thresh
     cur_heats_table *last_few_scans_arr[rescan_thresh];
     cur_heats_table_locked_table *last_few_scans_arr_locked[rescan_thresh];
     struct timespec ts;
     clock_t update_prev_refcnt_start, update_prev_refcnt_end, insert_record_start, insert_record_end, IO_start, IO_end;
     double update_prev_refcnt_time, total_hold_GIL_time, insert_record_time, whole_IO_time;
+
+    clock_t start_GC_list, end_GC_list;
+    double time_GC_list, total_time_GC_List;
     // unsigned int longer_sleep = 2 * bookkeep_args->sample_dur;
     int test_trace_matmul_region = 0;
     int fast_scan_to_drop = bookkeep_args->fast_scan_to_drop;
@@ -2360,7 +2363,9 @@ void *thread_trace_from_gc_list(void *arg)
             cur_op_gc_table = op_gc_table_init(0);
             fprintf(stderr, "slow peeking...\n");
             gstate = PyGILState_Ensure();
+            start_GC_list = clock();
             gc_get_objects_impl_op_gc(bookkeep_args->gen, cur_op_gc_table); // previous version
+            end_GC_list = clock();
             // gc_get_objects_impl_op_gc(bookkeep_args->gen, curHeats);
 
             // cascade GC trace
@@ -2383,6 +2388,8 @@ void *thread_trace_from_gc_list(void *arg)
             // now, update prev_refcnt for cascade traced objs
             curHeats_locked = cur_heats_table_lock_table(curHeats);
             update_prev_refcnt_slow_trace(curHeats_locked);
+            time_GC_list = (double)(end_GC_list - start_GC_list) / CLOCKS_PER_SEC;
+            total_time_GC_List += time_GC_list;
         }
         else 
         { // fast
@@ -2414,7 +2421,7 @@ void *thread_trace_from_gc_list(void *arg)
                     if (foundInner > prev_changed_min && foundInner < prev_changed_max)
                     {
                         PyObject *each_op = (PyObject *)foundInner;
-                        each_op->prev_refcnt = each_op->ob_refcnt; // TODO: need to put this line inside?
+                        each_op->prev_refcnt = each_op->ob_refcnt; // attention: this line position?
                         op_gc_table_insert(cur_op_gc_table, &foundInner, &dummy_value);
                     }
                 }
@@ -2483,7 +2490,7 @@ void *thread_trace_from_gc_list(void *arg)
                             prev_changed_min = each_op;
                         }
                     }
-                    cur_heats_table_insert(curHeats, &each_op, &temp); // attention: this line must be outside!
+                    cur_heats_table_insert(curHeats, &each_op, &temp); // attention: consider this line position??
                 }
                 fprintf(stderr, "populated min: %ld, max: %ld\n", prev_changed_min, prev_changed_max);
             }
@@ -2607,6 +2614,7 @@ void *thread_trace_from_gc_list(void *arg)
         fprintf(stderr, "IO time: %.3f seconds\n", whole_IO_time);
     }
     fprintf(stderr, "total_hold_GIL_time: %.3f\n", total_hold_GIL_time);
+    fprintf(stderr, "total_traverse_GC_list_time: %.3f\n", total_time_GC_List);
     all_heats_table_locked_table_free(allHeats_locked);
     all_heats_table_free(allHeats);
     terminate_flag = 0;
