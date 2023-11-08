@@ -2323,8 +2323,8 @@ void *thread_trace_from_gc_list(void *arg)
     unsigned int doIO_ = bookkeep_args->doIO;
     // RefTrackHeatmapHash *outter_item, *tmp_outter;
     // CurTimeObjHeat *inner_item, *tmp_inner;
-    int rescan_thresh = 20; // threshold to say after how many fast scan, that we do a complete scan, not const, probably need to dynamically change later
-    int cur_scan_idx = 0;  // indicates how many fast scan bk thread has done, resets to zero when reaching rescan_thresh
+    int rescan_thresh = 6; // threshold to say after how many fast scan, that we do a complete scan, not const, probably need to dynamically change later
+    int cur_scan_idx = 0;   // indicates how many fast scan bk thread has done, resets to zero when reaching rescan_thresh
     cur_heats_table *last_few_scans_arr[rescan_thresh];
     cur_heats_table_locked_table *last_few_scans_arr_locked[rescan_thresh];
     struct timespec ts;
@@ -2347,8 +2347,6 @@ void *thread_trace_from_gc_list(void *arg)
         perror("fast_scan_to_drop cannot be larger than rescan_thresh\n");
         exit(-1);
     }
-    op_gc_table *cur_op_gc_table;
-    op_gc_table_locked_table *cur_op_gc_locked_table;
     uintptr_t prev_changed_max;
     uintptr_t prev_changed_min = ULONG_MAX;
     uintptr_t no_93_upper = 100000000000000;
@@ -2358,8 +2356,10 @@ void *thread_trace_from_gc_list(void *arg)
         curHeats = cur_heats_table_init(0);
         /* slow trace: populate curHeats, from scratch (cascade GC_list)
             fast trace: populate cur_op_gc_table, from previous curHeats*/
-        if (cur_scan_idx == 0)
+        if (cur_scan_idx == 0)//slow
         { // slow trace, bookkeep_args->gen: [-1, 0, 1, 2], where -1 means all generations
+            op_gc_table *cur_op_gc_table;
+            op_gc_table_locked_table *cur_op_gc_locked_table;
             cur_op_gc_table = op_gc_table_init(0);
             fprintf(stderr, "slow peeking...\n");
             gstate = PyGILState_Ensure();
@@ -2391,30 +2391,32 @@ void *thread_trace_from_gc_list(void *arg)
             time_GC_list = (double)(end_GC_list - start_GC_list) / CLOCKS_PER_SEC;
             total_time_GC_List += time_GC_list;
         }
-        else 
+        else
         { // fast
-            cur_op_gc_table = op_gc_table_init(0);
-            cur_heats_table_const_iterator *curHeats_it, *curHeats_end;
+            // cur_op_gc_table = op_gc_table_init(0);
+            cur_heats_table_const_iterator *prevHeats_it, *prevHeats_end;
             fprintf(stderr, "fast peeking...\n");
             uintptr_t foundInner;
-            uint8_t dummy_value = 0;
-            curHeats_it = cur_heats_table_locked_table_begin(last_few_scans_arr_locked[cur_scan_idx - 1]); // iterate the previous curHeats
-            curHeats_end = cur_heats_table_locked_table_end(last_few_scans_arr_locked[cur_scan_idx - 1]);
+            // uint8_t dummy_value = 0;
+            Temperature dummy_temp = {0, 0};
+            prevHeats_it = cur_heats_table_locked_table_begin(last_few_scans_arr_locked[cur_scan_idx - 1]); // iterate the previous curHeats
+            prevHeats_end = cur_heats_table_locked_table_end(last_few_scans_arr_locked[cur_scan_idx - 1]);
             if (cur_scan_idx == 1) // update all traced objs' prev_refcnt, from casecad trace
             {
-                for (; !cur_heats_table_const_iterator_equal(curHeats_it, curHeats_end); cur_heats_table_const_iterator_increment(curHeats_it))
+                for (; !cur_heats_table_const_iterator_equal(prevHeats_it, prevHeats_end); cur_heats_table_const_iterator_increment(prevHeats_it))
                 {
-                    foundInner = *cur_heats_table_const_iterator_key(curHeats_it);
+                    foundInner = *cur_heats_table_const_iterator_key(prevHeats_it);
                     PyObject *each_op = (PyObject *)foundInner;
                     each_op->prev_refcnt = each_op->ob_refcnt;
-                    op_gc_table_insert(cur_op_gc_table, &foundInner, &dummy_value);
+                    // op_gc_table_insert(cur_op_gc_table, &foundInner, &dummy_value);
+                    cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
                 }
             }
             else
             { // only capture those within the diff range
-                for (; !cur_heats_table_const_iterator_equal(curHeats_it, curHeats_end); cur_heats_table_const_iterator_increment(curHeats_it))
+                for (; !cur_heats_table_const_iterator_equal(prevHeats_it, prevHeats_end); cur_heats_table_const_iterator_increment(prevHeats_it))
                 {
-                    foundInner = *cur_heats_table_const_iterator_key(curHeats_it);
+                    foundInner = *cur_heats_table_const_iterator_key(prevHeats_it);
                     /* Reason being outside: no matter where the objs lies in,
                         we update the prev_refcnt for accuracy,
                         but need to check performance difference */
@@ -2422,12 +2424,13 @@ void *thread_trace_from_gc_list(void *arg)
                     {
                         PyObject *each_op = (PyObject *)foundInner;
                         each_op->prev_refcnt = each_op->ob_refcnt; // attention: this line position?
-                        op_gc_table_insert(cur_op_gc_table, &foundInner, &dummy_value);
+                        // op_gc_table_insert(cur_op_gc_table, &foundInner, &dummy_value);
+                        cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
                     }
                 }
             }
-            cur_heats_table_const_iterator_free(curHeats_end);
-            cur_heats_table_const_iterator_free(curHeats_it); // this only free the iterator, not the table, table will be freed later in batches
+            cur_heats_table_const_iterator_free(prevHeats_end);
+            cur_heats_table_const_iterator_free(prevHeats_it); // this only free the iterator, not the table, table will be freed later in batches
         }
         // PyGILState_Release(gstate);
         update_prev_refcnt_end = clock();
@@ -2463,22 +2466,27 @@ void *thread_trace_from_gc_list(void *arg)
         { // fast trace
             insert_record_start = clock();
             Temperature temp;
-            size_t foundSizeof; // can be here?? make sure populated correctly, but shoudn't matter anyway
+            // size_t foundSizeof; // can be here?? make sure populated correctly, but shoudn't matter anyway
 
-            cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table); // for iterating, remember to free this
+            // cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table); // for iterating, remember to free this
             // fprintf(stderr, "all size is: %zu\n", op_gc_table_locked_table_size(cur_op_gc_locked_table));
-            op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
-            op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
+            // op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
+            // op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
+            cur_heats_table_iterator *curHeats_it, *curHeats_end;
+            curHeats_locked = cur_heats_table_lock_table(curHeats);
+            curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
+            curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
+            cur_heats_table_locked_table_unlock(curHeats_locked);
             uintptr_t each_op;
             if (cur_scan_idx == 1)
             {
-                for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+                for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
+                     cur_heats_table_iterator_increment(curHeats_it))
                 {
-                    each_op = *op_gc_table_iterator_key(op_gc_it); // each_op is uintptr_t type
+                    each_op = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)each_op;
                     temp.cur_sizeof = 0;
                     temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
-                    // udpate min & max, for the rest fast cycles
                     if (temp.diff != 0)
                     {
                         if (each_op > prev_changed_max)
@@ -2490,36 +2498,66 @@ void *thread_trace_from_gc_list(void *arg)
                             prev_changed_min = each_op;
                         }
                     }
-                    cur_heats_table_insert(curHeats, &each_op, &temp); // attention: consider this line position??
+                    cur_heats_table_update(curHeats, &each_op, &temp);
                 }
+                // for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+                // {
+                //     each_op = *op_gc_table_iterator_key(op_gc_it); // each_op is uintptr_t type
+                //     PyObject *op = (PyObject *)each_op;
+                //     temp.cur_sizeof = 0;
+                //     temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
+                //     if (temp.diff != 0)
+                //     {
+                //         if (each_op > prev_changed_max)
+                //         {
+                //             prev_changed_max = each_op;
+                //         }
+                //         else if (each_op < prev_changed_min && each_op > no_93_upper)
+                //         {
+                //             prev_changed_min = each_op;
+                //         }
+                //     }
+                //     cur_heats_table_insert(curHeats, &each_op, &temp); // attention: consider this line position??
+                // }
                 fprintf(stderr, "populated min: %ld, max: %ld\n", prev_changed_min, prev_changed_max);
             }
             else
             {
-                for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+                for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
+                     cur_heats_table_iterator_increment(curHeats_it))
                 {
-                    each_op = *op_gc_table_iterator_key(op_gc_it); // each_op is uintptr_t type
+                    each_op = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)each_op;
-                    temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
                     temp.cur_sizeof = 0;
-                    cur_heats_table_insert(curHeats, &each_op, &temp);
-                    // if(temp.diff != 0) { // uncomment for debugging
-                    //     gstate = PyGILState_Ensure();
-                    //     fprintf(stderr, "%ld\n", each_op);
-                    //     // PyObject_Print(op, stderr, 1);
-                    //     // fprintf(stderr, "\n");
-                    //     PyGILState_Release(gstate);
-                    // }
+                    temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
+                    cur_heats_table_update(curHeats, &each_op, &temp);
                 }
+                // for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+                // {
+                //     each_op = *op_gc_table_iterator_key(op_gc_it); // each_op is uintptr_t type
+                //     PyObject *op = (PyObject *)each_op;
+                //     temp.diff = (long)(op->ob_refcnt - op->prev_refcnt);
+                //     temp.cur_sizeof = 0;
+                //     cur_heats_table_insert(curHeats, &each_op, &temp);
+                //     // if(temp.diff != 0) { // uncomment for debugging
+                //     //     gstate = PyGILState_Ensure();
+                //     //     fprintf(stderr, "%ld\n", each_op);
+                //     //     // PyObject_Print(op, stderr, 1);
+                //     //     // fprintf(stderr, "\n");
+                //     //     PyGILState_Release(gstate);
+                //     // }
+                // }
             }
             insert_record_end = clock();
             insert_record_time = (double)(insert_record_end - insert_record_start) / CLOCKS_PER_SEC;
             fprintf(stderr, "insert record time: %.3f seconds\n", insert_record_time);
-            op_gc_table_iterator_free(op_gc_end);
-            op_gc_table_iterator_free(op_gc_it);
-            op_gc_table_locked_table_free(cur_op_gc_locked_table);
-            op_gc_table_free(cur_op_gc_table);
-            curHeats_locked = cur_heats_table_lock_table(curHeats);
+            cur_heats_table_iterator_free(curHeats_end);
+            cur_heats_table_iterator_free(curHeats_it);
+            // op_gc_table_iterator_free(op_gc_end);
+            // op_gc_table_iterator_free(op_gc_it);
+            // op_gc_table_locked_table_free(cur_op_gc_locked_table);
+            // op_gc_table_free(cur_op_gc_table);
+            // curHeats_locked = cur_heats_table_lock_table(curHeats);
         }
 
         fprintf(stderr, "cur round: %d, # all: %d, # changed: ~~\n", cur_scan_idx, cur_heats_table_locked_table_size(curHeats_locked)); // ? what's the value
