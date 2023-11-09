@@ -2757,9 +2757,9 @@ if test "$srcdir" != . -a "$srcdir" != "$(pwd)"; then
     #  regenerated when building out-of-tree, regardless of whether or not
     #  the $srcdir counterpart is up-to-date.  This is an acceptable trade
     #  off.)
-    BASECPPFLAGS="-IObjects -IInclude -IPython -I/home/lyuze/workspace/libcuckoo/install/include"
+    BASECPPFLAGS="-IObjects -IInclude -IPython"
 else
-    BASECPPFLAGS="-I/home/lyuze/workspace/libcuckoo/install/include"
+    BASECPPFLAGS=""
 fi
 
 
