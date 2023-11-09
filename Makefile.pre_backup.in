@@ -35,7 +35,7 @@ abs_builddir=	@abs_builddir@
 
 
 CC=		@CC@
-CXX=		@CXX@ -I/home/lyuze/workspace/libcuckoo/install/include
+CXX=		@CXX@
 LINKCC=		@LINKCC@
 AR=		@AR@
 READELF=	@READELF@
@@ -81,7 +81,7 @@ MAKESETUP=      $(srcdir)/Modules/makesetup
 # Compiler options
 OPT=		@OPT@
 BASECFLAGS=	@BASECFLAGS@
-BASECPPFLAGS=	@BASECPPFLAGS@ -I/home/lyuze/workspace/libcuckoo/install/include
+BASECPPFLAGS=	@BASECPPFLAGS@
 CONFIGURE_CFLAGS=	@CFLAGS@
 # CFLAGS_NODIST is used for building the interpreter and stdlib C extensions.
 # Use it when a compiler flag should _not_ be part of the distutils CFLAGS
@@ -265,7 +265,7 @@ PY_ENABLE_SHARED=	@PY_ENABLE_SHARED@
 STATIC_LIBPYTHON=	@STATIC_LIBPYTHON@
 
 
-LIBS=		@LIBS@ -lstdc++
+LIBS=		@LIBS@
 LIBM=		@LIBM@
 LIBC=		@LIBC@
 SYSLIBS=	$(LIBM) $(LIBC)
@@ -369,9 +369,6 @@ PYTHON_OBJS=	\
 		Python/_warnings.o \
 		Python/Python-ast.o \
 		Python/Python-tokenize.o \
-		Python/allHeats.o \
-		Python/curHeats.o \
-		Python/op_gc.o \
 		Python/asdl.o \
 		Python/assemble.o \
 		Python/ast.o \
@@ -1802,9 +1799,6 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/internal/pycore_unicodeobject.h \
 		$(srcdir)/Include/internal/pycore_unicodeobject_generated.h \
 		$(srcdir)/Include/internal/pycore_warnings.h \
-		$(srcdir)/Include/allHeats.h \
-		$(srcdir)/Include/curHeats.h \
-		$(srcdir)/Include/op_gc.h \
 		$(DTRACE_HEADERS) \
 		@PLATFORM_HEADERS@ \
 		\

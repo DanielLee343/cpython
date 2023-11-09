@@ -445,20 +445,20 @@ check by comparing the reference count field to the immortality reference count.
 /* Flag bits for printing: */
 #define Py_PRINT_RAW 1 /* No string quotes etc. */
 
-    // typedef struct
-    // {
-    //     unsigned int sample_dur;
-    //     FILE *fd;
-    //     unsigned int buff_size;
-    //     unsigned int doIO;
-    //     Py_ssize_t gen;
-    //     int fast_scan_to_drop;
-    // } BookkeepArgs;
-    // extern BookkeepArgs bookkeepArgs;
-    // PyAPI_DATA(BookkeepArgs) bookkeepArgs;
-    // PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
-    // extern volatile short terminate_flag;
-    // PyAPI_DATA(volatile short) terminate_flag;
+    typedef struct
+    {
+        unsigned int sample_dur;
+        FILE *fd;
+        unsigned int buff_size;
+        unsigned int doIO;
+        Py_ssize_t gen;
+        int fast_scan_to_drop;
+    } BookkeepArgs;
+    extern BookkeepArgs bookkeepArgs;
+    PyAPI_DATA(BookkeepArgs) bookkeepArgs;
+    PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
+    extern volatile short terminate_flag;
+    PyAPI_DATA(volatile short) terminate_flag;
     /*
     Type flags (tp_flags)
 
