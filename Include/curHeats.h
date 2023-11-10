@@ -3,6 +3,8 @@
 #include <stdint.h>
 typedef struct
 {
+    intptr_t prev_refcnt;
+    // intptr_t most_recent_refcnt;
     long diff;
     unsigned int cur_sizeof;
 } Temperature;
