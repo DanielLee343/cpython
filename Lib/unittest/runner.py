@@ -222,6 +222,7 @@ class TextTestRunner(object):
             self.stream.writeln("")
 
     def run(self, test):
+        print("run the test")
         "Run the given test case or test suite."
         result = self._makeResult()
         registerResult(result)

@@ -163,8 +163,8 @@ static inline void
 _PyObject_Init(PyObject *op, PyTypeObject *typeobj)
 {
     assert(op != NULL);
-    op->prev_refcnt = 0;
-    op->cur_op_size = 0;
+    // op->prev_refcnt = 0;
+    // op->cur_op_size = 0;
     Py_SET_TYPE(op, typeobj);
     if (_PyType_HasFeature(typeobj, Py_TPFLAGS_HEAPTYPE)) {
         Py_INCREF(typeobj);

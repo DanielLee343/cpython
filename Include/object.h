@@ -136,7 +136,7 @@ check by comparing the reference count field to the immortality reference count.
 #define PyObject_HEAD_INIT(type) \
     {                            \
         _PyObject_EXTRA_INIT{1}, \
-        (type), 0, 0},
+        (type)},
 #endif /* Py_BUILD_CORE */
 
 #define PyVarObject_HEAD_INIT(type, size) \
@@ -183,8 +183,8 @@ check by comparing the reference count field to the immortality reference count.
 #endif
 
             PyTypeObject *ob_type;
-        Py_ssize_t prev_refcnt;
-        uint32_t cur_op_size;
+        // Py_ssize_t prev_refcnt;
+        // uint32_t cur_op_size;
     };
 
 /* Cast argument to PyObject* type. */
@@ -449,16 +449,20 @@ check by comparing the reference count field to the immortality reference count.
     {
         unsigned int sample_dur;
         FILE *fd;
-        unsigned int buff_size;
         unsigned int doIO;
-        Py_ssize_t gen;
-        int fast_scan_to_drop;
+        int rescan_thresh;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
     PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
     extern volatile short terminate_flag;
     PyAPI_DATA(volatile short) terminate_flag;
+
+    /*following are for trace refchain*/
+    extern volatile short terminate_flag_refchain;
+    PyAPI_DATA(volatile short) terminate_flag_refchain;
+    PyAPI_FUNC(void *) thread_trace_from_refchain(void *arg);
+
     /*
     Type flags (tp_flags)
 

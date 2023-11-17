@@ -63,6 +63,7 @@ class TestProgram(object):
     verbosity = 1
     failfast = catchbreak = buffer = progName = warnings = testNamePatterns = None
     _discovery_parser = None
+    print("entering TestProgram...")
 
     def __init__(self, module='__main__', defaultTest=None, argv=None,
                     testRunner=None, testLoader=loader.defaultTestLoader,
@@ -253,6 +254,7 @@ class TestProgram(object):
         self.createTests(from_discovery=True, Loader=Loader)
 
     def runTests(self):
+        print("entering runTests...")
         if self.catchbreak:
             installHandler()
         if self.testRunner is None:
