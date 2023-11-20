@@ -6,10 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-// #undef CUCKOO_TABLE_NAME
-// #undef CUCKOO_KEY_TYPE
-// #undef CUCKOO_MAPPED_TYPE
-// #include "op_gc.h"
+
 /* This limitation is for performance and simplicity. If needed it can be
 removed (with effort). */
 #define MAX_CO_EXTRA_USERS 255

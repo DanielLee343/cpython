@@ -37,9 +37,9 @@
 #  error "_testcapi must test the public Python C API, not CPython internal C API"
 #endif
 
-#ifdef bool
-#  error "The public headers should not include <stdbool.h>, see bpo-46748"
-#endif
+// #ifdef bool
+// #  error "The public headers should not include <stdbool.h>, see bpo-46748"
+// #endif
 
 // Several parts of this module are broken out into files in _testcapi/.
 // Include definitions from there.

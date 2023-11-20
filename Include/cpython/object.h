@@ -1,5 +1,5 @@
 #ifndef Py_CPYTHON_OBJECT_H
-#  error "this header file must not be included directly"
+#error "this header file must not be included directly"
 #endif
 
 PyAPI_FUNC(void) _Py_NewReference(PyObject *op);
@@ -13,11 +13,10 @@ PyAPI_FUNC(void) _Py_ForgetReference(PyObject *);
 #ifdef Py_REF_DEBUG
 /* These are useful as debugging aids when chasing down refleaks. */
 PyAPI_FUNC(Py_ssize_t) _Py_GetGlobalRefTotal(void);
-#  define _Py_GetRefTotal() _Py_GetGlobalRefTotal()
+#define _Py_GetRefTotal() _Py_GetGlobalRefTotal()
 PyAPI_FUNC(Py_ssize_t) _Py_GetLegacyRefTotal(void);
 PyAPI_FUNC(Py_ssize_t) _PyInterpreterState_GetRefTotal(PyInterpreterState *);
 #endif
-
 
 /********************* String Literals ****************************************/
 /* This structure helps managing static strings. The basic usage goes like this:
@@ -39,8 +38,9 @@ PyAPI_FUNC(Py_ssize_t) _PyInterpreterState_GetRefTotal(PyInterpreterState *);
    _PyUnicode_FromId returns a borrowed reference to the interned string.
    _PyObject_{Get,Set,Has}AttrId are __getattr__ versions using _Py_Identifier*.
 */
-typedef struct _Py_Identifier {
-    const char* string;
+typedef struct _Py_Identifier
+{
+    const char *string;
     // Index in PyInterpreterState.unicode.ids.array. It is process-wide
     // unique and must be initialized to -1.
     Py_ssize_t index;
@@ -50,13 +50,17 @@ typedef struct _Py_Identifier {
 // For now we are keeping _Py_IDENTIFIER for continued use
 // in non-builtin extensions (and naughty PyPI modules).
 
-#define _Py_static_string_init(value) { .string = (value), .index = -1 }
-#define _Py_static_string(varname, value)  static _Py_Identifier varname = _Py_static_string_init(value)
+#define _Py_static_string_init(value)  \
+    {                                  \
+        .string = (value), .index = -1 \
+    }
+#define _Py_static_string(varname, value) static _Py_Identifier varname = _Py_static_string_init(value)
 #define _Py_IDENTIFIER(varname) _Py_static_string(PyId_##varname, #varname)
 
 #endif /* !Py_BUILD_CORE */
 
-typedef struct {
+typedef struct
+{
     /* Number implementations must check *both*
        arguments for proper type and implement the necessary conversions
        in the slot functions themselves. */
@@ -78,7 +82,7 @@ typedef struct {
     binaryfunc nb_xor;
     binaryfunc nb_or;
     unaryfunc nb_int;
-    void *nb_reserved;  /* the slot formerly known as nb_long */
+    void *nb_reserved; /* the slot formerly known as nb_long */
     unaryfunc nb_float;
 
     binaryfunc nb_inplace_add;
@@ -103,7 +107,8 @@ typedef struct {
     binaryfunc nb_inplace_matrix_multiply;
 } PyNumberMethods;
 
-typedef struct {
+typedef struct
+{
     lenfunc sq_length;
     binaryfunc sq_concat;
     ssizeargfunc sq_repeat;
@@ -117,7 +122,8 @@ typedef struct {
     ssizeargfunc sq_inplace_repeat;
 } PySequenceMethods;
 
-typedef struct {
+typedef struct
+{
     lenfunc mp_length;
     binaryfunc mp_subscript;
     objobjargproc mp_ass_subscript;
@@ -125,16 +131,18 @@ typedef struct {
 
 typedef PySendResult (*sendfunc)(PyObject *iter, PyObject *value, PyObject **result);
 
-typedef struct {
+typedef struct
+{
     unaryfunc am_await;
     unaryfunc am_aiter;
     unaryfunc am_anext;
     sendfunc am_send;
 } PyAsyncMethods;
 
-typedef struct {
-     getbufferproc bf_getbuffer;
-     releasebufferproc bf_releasebuffer;
+typedef struct
+{
+    getbufferproc bf_getbuffer;
+    releasebufferproc bf_releasebuffer;
 } PyBufferProcs;
 
 /* Allow printfunc in the tp_vectorcall_offset slot for
@@ -143,10 +151,10 @@ typedef Py_ssize_t printfunc;
 
 // If this structure is modified, Doc/includes/typestruct.h should be updated
 // as well.
-struct _typeobject {
-    PyObject_VAR_HEAD
-    const char *tp_name; /* For printing, in format "<module>.<name>" */
-    Py_ssize_t tp_basicsize, tp_itemsize; /* For allocation */
+struct _typeobject
+{
+    PyObject_VAR_HEAD const char *tp_name; /* For printing, in format "<module>.<name>" */
+    Py_ssize_t tp_basicsize, tp_itemsize;  /* For allocation */
 
     /* Methods to implement standard operations */
 
@@ -214,9 +222,9 @@ struct _typeobject {
     freefunc tp_free; /* Low-level free-memory routine */
     inquiry tp_is_gc; /* For PyObject_IS_GC */
     PyObject *tp_bases;
-    PyObject *tp_mro; /* method resolution order */
-    PyObject *tp_cache; /* no longer used */
-    void *tp_subclasses;  /* for static builtin types this is an index */
+    PyObject *tp_mro;      /* method resolution order */
+    PyObject *tp_cache;    /* no longer used */
+    void *tp_subclasses;   /* for static builtin types this is an index */
     PyObject *tp_weaklist; /* not used for static builtin types */
     destructor tp_del;
 
@@ -233,7 +241,8 @@ struct _typeobject {
 /* This struct is used by the specializer
  * It should should be treated as an opaque blob
  * by code other than the specializer and interpreter. */
-struct _specialization_cache {
+struct _specialization_cache
+{
     // In order to avoid bloating the bytecode with lots of inline caches, the
     // members of this structure have a somewhat unique contract. They are set
     // by the specialization machinery, and are invalidated by PyType_Modified.
@@ -249,7 +258,8 @@ struct _specialization_cache {
 };
 
 /* The *real* layout of a type object when allocated on the heap */
-typedef struct _heaptypeobject {
+typedef struct _heaptypeobject
+{
     /* Note: there's a dependency on the order of these members
        in slotptr() in typeobject.c . */
     PyTypeObject ht_type;
@@ -265,7 +275,7 @@ typedef struct _heaptypeobject {
     PyObject *ht_name, *ht_slots, *ht_qualname;
     struct _dictkeysobject *ht_cached_keys;
     PyObject *ht_module;
-    char *_ht_tpname;  // Storage for "tp_name"; see PyType_FromModuleAndSpec
+    char *_ht_tpname;                         // Storage for "tp_name"; see PyType_FromModuleAndSpec
     struct _specialization_cache _spec_cache; // For use by the specializer.
     /* here are optional user slots, followed by the members. */
 } PyHeapTypeObject;
@@ -315,10 +325,10 @@ PyAPI_FUNC(int) PyObject_CallFinalizerFromDealloc(PyObject *);
 /* Same as PyObject_Generic{Get,Set}Attr, but passing the attributes
    dict as the last parameter. */
 PyAPI_FUNC(PyObject *)
-_PyObject_GenericGetAttrWithDict(PyObject *, PyObject *, PyObject *, int);
+    _PyObject_GenericGetAttrWithDict(PyObject *, PyObject *, PyObject *, int);
 PyAPI_FUNC(int)
-_PyObject_GenericSetAttrWithDict(PyObject *, PyObject *,
-                                 PyObject *, PyObject *);
+    _PyObject_GenericSetAttrWithDict(PyObject *, PyObject *,
+                                     PyObject *, PyObject *);
 
 PyAPI_FUNC(PyObject *) _PyObject_FunctionStr(PyObject *);
 
@@ -346,21 +356,23 @@ PyAPI_FUNC(PyObject *) _PyObject_FunctionStr(PyObject *);
  * not the same type than 'src': any pointer type is accepted for 'src'.
  */
 #ifdef _Py_TYPEOF
-#define Py_SETREF(dst, src) \
-    do { \
-        _Py_TYPEOF(dst)* _tmp_dst_ptr = &(dst); \
+#define Py_SETREF(dst, src)                             \
+    do                                                  \
+    {                                                   \
+        _Py_TYPEOF(dst) *_tmp_dst_ptr = &(dst);         \
         _Py_TYPEOF(dst) _tmp_old_dst = (*_tmp_dst_ptr); \
-        *_tmp_dst_ptr = (src); \
-        Py_DECREF(_tmp_old_dst); \
+        *_tmp_dst_ptr = (src);                          \
+        Py_DECREF(_tmp_old_dst);                        \
     } while (0)
 #else
-#define Py_SETREF(dst, src) \
-    do { \
-        PyObject **_tmp_dst_ptr = _Py_CAST(PyObject**, &(dst)); \
-        PyObject *_tmp_old_dst = (*_tmp_dst_ptr); \
-        PyObject *_tmp_src = _PyObject_CAST(src); \
-        memcpy(_tmp_dst_ptr, &_tmp_src, sizeof(PyObject*)); \
-        Py_DECREF(_tmp_old_dst); \
+#define Py_SETREF(dst, src)                                      \
+    do                                                           \
+    {                                                            \
+        PyObject **_tmp_dst_ptr = _Py_CAST(PyObject **, &(dst)); \
+        PyObject *_tmp_old_dst = (*_tmp_dst_ptr);                \
+        PyObject *_tmp_src = _PyObject_CAST(src);                \
+        memcpy(_tmp_dst_ptr, &_tmp_src, sizeof(PyObject *));     \
+        Py_DECREF(_tmp_old_dst);                                 \
     } while (0)
 #endif
 
@@ -368,24 +380,25 @@ PyAPI_FUNC(PyObject *) _PyObject_FunctionStr(PyObject *);
  * Py_DECREF().
  */
 #ifdef _Py_TYPEOF
-#define Py_XSETREF(dst, src) \
-    do { \
-        _Py_TYPEOF(dst)* _tmp_dst_ptr = &(dst); \
+#define Py_XSETREF(dst, src)                            \
+    do                                                  \
+    {                                                   \
+        _Py_TYPEOF(dst) *_tmp_dst_ptr = &(dst);         \
         _Py_TYPEOF(dst) _tmp_old_dst = (*_tmp_dst_ptr); \
-        *_tmp_dst_ptr = (src); \
-        Py_XDECREF(_tmp_old_dst); \
+        *_tmp_dst_ptr = (src);                          \
+        Py_XDECREF(_tmp_old_dst);                       \
     } while (0)
 #else
-#define Py_XSETREF(dst, src) \
-    do { \
-        PyObject **_tmp_dst_ptr = _Py_CAST(PyObject**, &(dst)); \
-        PyObject *_tmp_old_dst = (*_tmp_dst_ptr); \
-        PyObject *_tmp_src = _PyObject_CAST(src); \
-        memcpy(_tmp_dst_ptr, &_tmp_src, sizeof(PyObject*)); \
-        Py_XDECREF(_tmp_old_dst); \
+#define Py_XSETREF(dst, src)                                     \
+    do                                                           \
+    {                                                            \
+        PyObject **_tmp_dst_ptr = _Py_CAST(PyObject **, &(dst)); \
+        PyObject *_tmp_old_dst = (*_tmp_dst_ptr);                \
+        PyObject *_tmp_src = _PyObject_CAST(src);                \
+        memcpy(_tmp_dst_ptr, &_tmp_src, sizeof(PyObject *));     \
+        Py_XDECREF(_tmp_old_dst);                                \
     } while (0)
 #endif
-
 
 PyAPI_DATA(PyTypeObject) _PyNone_Type;
 PyAPI_DATA(PyTypeObject) _PyNotImplemented_Type;
@@ -396,10 +409,10 @@ PyAPI_DATA(PyTypeObject) _PyNotImplemented_Type;
 PyAPI_DATA(int) _Py_SwappedOp[];
 
 PyAPI_FUNC(void)
-_PyDebugAllocatorStats(FILE *out, const char *block_name, int num_blocks,
-                       size_t sizeof_block);
+    _PyDebugAllocatorStats(FILE *out, const char *block_name, int num_blocks,
+                           size_t sizeof_block);
 PyAPI_FUNC(void)
-_PyObject_DebugTypeStats(FILE *out);
+    _PyObject_DebugTypeStats(FILE *out);
 
 /* Define a pair of assertion macros:
    _PyObject_ASSERT_FROM(), _PyObject_ASSERT_WITH_MSG() and _PyObject_ASSERT().
@@ -416,16 +429,16 @@ _PyObject_DebugTypeStats(FILE *out);
    The WITH_MSG variant allows you to supply an additional message that Python
    will attempt to print to stderr, after the object dump. */
 #ifdef NDEBUG
-   /* No debugging: compile away the assertions: */
-#  define _PyObject_ASSERT_FROM(obj, expr, msg, filename, lineno, func) \
+/* No debugging: compile away the assertions: */
+#define _PyObject_ASSERT_FROM(obj, expr, msg, filename, lineno, func) \
     ((void)0)
 #else
-   /* With debugging: generate checks: */
-#  define _PyObject_ASSERT_FROM(obj, expr, msg, filename, lineno, func) \
-    ((expr) \
-      ? (void)(0) \
-      : _PyObject_AssertFailed((obj), Py_STRINGIFY(expr), \
-                               (msg), (filename), (lineno), (func)))
+/* With debugging: generate checks: */
+#define _PyObject_ASSERT_FROM(obj, expr, msg, filename, lineno, func) \
+    ((expr)                                                           \
+         ? (void)(0)                                                  \
+         : _PyObject_AssertFailed((obj), Py_STRINGIFY(expr),          \
+                                  (msg), (filename), (lineno), (func)))
 #endif
 
 #define _PyObject_ASSERT_WITH_MSG(obj, expr, msg) \
@@ -463,7 +476,6 @@ PyAPI_FUNC(void) _Py_NO_RETURN _PyObject_AssertFailed(
 PyAPI_FUNC(int) _PyObject_CheckConsistency(
     PyObject *op,
     int check_content);
-
 
 /* Trashcan mechanism, thanks to Christian Tismer.
 
@@ -518,27 +530,33 @@ PyAPI_FUNC(void) _PyTrash_end(PyThreadState *tstate);
 /* Python 3.10 private API, invoked by the Py_TRASHCAN_BEGIN(). */
 PyAPI_FUNC(int) _PyTrash_cond(PyObject *op, destructor dealloc);
 
-#define Py_TRASHCAN_BEGIN_CONDITION(op, cond) \
-    do { \
-        PyThreadState *_tstate = NULL; \
+#define Py_TRASHCAN_BEGIN_CONDITION(op, cond)                                \
+    do                                                                       \
+    {                                                                        \
+        PyThreadState *_tstate = NULL;                                       \
         /* If "cond" is false, then _tstate remains NULL and the deallocator \
-         * is run normally without involving the trashcan */ \
-        if (cond) { \
-            _tstate = _PyThreadState_UncheckedGet(); \
-            if (_PyTrash_begin(_tstate, _PyObject_CAST(op))) { \
-                break; \
-            } \
+         * is run normally without involving the trashcan */                 \
+        if (cond)                                                            \
+        {                                                                    \
+            _tstate = _PyThreadState_UncheckedGet();                         \
+            if (_PyTrash_begin(_tstate, _PyObject_CAST(op)))                 \
+            {                                                                \
+                break;                                                       \
+            }                                                                \
         }
-        /* The body of the deallocator is here. */
-#define Py_TRASHCAN_END \
-        if (_tstate) { \
-            _PyTrash_end(_tstate); \
-        } \
-    } while (0);
+/* The body of the deallocator is here. */
+#define Py_TRASHCAN_END        \
+    if (_tstate)               \
+    {                          \
+        _PyTrash_end(_tstate); \
+    }                          \
+    }                          \
+    while (0)                  \
+        ;
 
 #define Py_TRASHCAN_BEGIN(op, dealloc) \
-    Py_TRASHCAN_BEGIN_CONDITION((op), \
-        _PyTrash_cond(_PyObject_CAST(op), (destructor)(dealloc)))
+    Py_TRASHCAN_BEGIN_CONDITION((op),  \
+                                _PyTrash_cond(_PyObject_CAST(op), (destructor)(dealloc)))
 
 /* The following two macros, Py_TRASHCAN_SAFE_BEGIN and
  * Py_TRASHCAN_SAFE_END, are deprecated since version 3.11 and
@@ -546,13 +564,16 @@ PyAPI_FUNC(int) _PyTrash_cond(PyObject *op, destructor dealloc);
  * Use Py_TRASHCAN_BEGIN and Py_TRASHCAN_END instead.
  */
 Py_DEPRECATED(3.11) typedef int UsingDeprecatedTrashcanMacro;
-#define Py_TRASHCAN_SAFE_BEGIN(op) \
-    do { \
-        UsingDeprecatedTrashcanMacro cond=1; \
+#define Py_TRASHCAN_SAFE_BEGIN(op)             \
+    do                                         \
+    {                                          \
+        UsingDeprecatedTrashcanMacro cond = 1; \
         Py_TRASHCAN_BEGIN_CONDITION((op), cond);
 #define Py_TRASHCAN_SAFE_END(op) \
-        Py_TRASHCAN_END; \
-    } while(0);
+    Py_TRASHCAN_END;             \
+    }                            \
+    while (0)                    \
+        ;
 
 PyAPI_FUNC(void *) PyObject_GetItemData(PyObject *obj);
 
@@ -561,7 +582,7 @@ PyAPI_FUNC(void) _PyObject_ClearManagedDict(PyObject *obj);
 
 #define TYPE_MAX_WATCHERS 8
 
-typedef int(*PyType_WatchCallback)(PyTypeObject *);
+typedef int (*PyType_WatchCallback)(PyTypeObject *);
 PyAPI_FUNC(int) PyType_AddWatcher(PyType_WatchCallback callback);
 PyAPI_FUNC(int) PyType_ClearWatcher(int watcher_id);
 PyAPI_FUNC(int) PyType_Watch(int watcher_id, PyObject *type);

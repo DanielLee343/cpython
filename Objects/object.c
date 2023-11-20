@@ -74,6 +74,7 @@ extern "C"
 #undef CUCKOO_KEY_TYPE
 #undef CUCKOO_MAPPED_TYPE
 #include "op_gc.h"
+    extern op_gc_table *global_op_table;
 
 #ifdef Py_REF_DEBUG
     /* We keep the legacy symbol around for backward compatibility. */
@@ -2806,10 +2807,18 @@ extern "C"
 
         Py_FatalError("_PyObject_AssertFailed");
     }
-
+    void insert_global_op_table(PyObject *op)
+    {
+        uintptr_t casted_op = (uintptr_t)op;
+        uint8_t dummy_val = 0;
+        op_gc_table_insert(global_op_table, &casted_op, &dummy_val);
+        // fprintf("%ld ", op_gc_table_size(global_op_table));
+    }
     void
     _Py_Dealloc(PyObject *op)
     {
+        // uintptr_t casted_op = (uintptr_t)op;
+        // op_gc_table_erase(global_op_table, &casted_op);
         PyTypeObject *type = Py_TYPE(op);
         destructor dealloc = type->tp_dealloc;
 #ifdef Py_DEBUG
@@ -2943,6 +2952,7 @@ void inspect_all_refchain(PyInterpreterState *interp, cur_heats_table *curHeats)
 
 void *thread_trace_from_refchain(void *arg)
 {
+    
     fprintf(stderr, "start bookkeep thread\n");
     BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
     if (bookkeep_args->fd == NULL)
@@ -3071,7 +3081,7 @@ void *thread_trace_from_refchain(void *arg)
                     each_op = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)each_op;
                     temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-                    temp_ptr->diff = (long)(op->ob_refcnt - temp_ptr->prev_refcnt);
+                    temp_ptr->diff = op->ob_refcnt - temp_ptr->prev_refcnt;
                     if (temp_ptr->diff != 0)
                     {
                         if (each_op > prev_changed_max)
@@ -3094,7 +3104,7 @@ void *thread_trace_from_refchain(void *arg)
                     each_op = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)each_op;
                     temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-                    temp_ptr->diff = (long)(op->ob_refcnt - temp_ptr->prev_refcnt);
+                    temp_ptr->diff = op->ob_refcnt - temp_ptr->prev_refcnt;
                     // cur_heats_table_update(curHeats, &each_op, temp_ptr);
                 }
             }
@@ -3180,5 +3190,64 @@ void *thread_trace_from_refchain(void *arg)
     all_heats_table_free(allHeats);
     terminate_flag_refchain = 0;
     fprintf(stderr, "finish bookkeeping, shutdown from tracing refchain...\n");
+}
+
+void *print_obj_count(void *arg)
+{
+    fprintf(stderr, "peeking live # objs\n");
+    PyGILState_STATE gstate;
+    cur_heats_table *curHeats, *prevHeats;
+    fprintf(stderr, "SIZEOF_VOID_P: %d, PY_BIG_ENDIAN: %d\n", SIZEOF_VOID_P, PY_BIG_ENDIAN); // 8, 0
+    short very_first = 0;
+    int free_counter = 0;
+    while (1)
+    {
+        curHeats = cur_heats_table_init(0);
+        gstate = PyGILState_Ensure();
+        PyThreadState *tstate = _PyThreadState_GET();
+        PyInterpreterState *interp = tstate->interp;
+        // PyInterpreterState *interp = _PyInterpreterState_Main(); // another way to get interp
+
+        inspect_all_refchain(interp, curHeats);
+        unsigned long cur_size_proact = op_gc_table_size(global_op_table);
+        PyGILState_Release(gstate);
+
+        usleep(500000);
+        fprintf(stderr, "cur_size_proact: %ld, refchain_size: %ld\n", cur_size_proact, cur_heats_table_size(curHeats));
+
+        // TODO: do a compare of prevHeats and curHeats
+        if (very_first != 0)
+        {
+            cur_heats_table_locked_table *locked = cur_heats_table_lock_table(curHeats);
+            cur_heats_table_iterator *curHeats_it = cur_heats_table_locked_table_begin(locked);
+            cur_heats_table_iterator *curHeats_end = cur_heats_table_locked_table_end(locked);
+            cur_heats_table_locked_table_unlock(locked);
+            uintptr_t each_op;
+            for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
+                 cur_heats_table_iterator_increment(curHeats_it))
+            {
+                each_op = *cur_heats_table_iterator_key(curHeats_it);
+                if (!cur_heats_table_contains(prevHeats, &each_op))
+                {
+                    gstate = PyGILState_Ensure();
+                    PyObject *op = (PyObject *)each_op;
+                    PyObject_Print(op, stderr, 1);
+                    fprintf(stderr, "\n");
+                    PyGILState_Release(gstate);
+                }
+            }
+            cur_heats_table_iterator_free(curHeats_end);
+            cur_heats_table_iterator_free(curHeats_it);
+            cur_heats_table_locked_table_free(locked);
+        }
+        very_first = 1;
+        if (++free_counter == 2)
+        {
+            // cur_heats_table_free(curHeats);
+            cur_heats_table_free(prevHeats);
+            free_counter = 0;
+        }
+        prevHeats = curHeats;
+    }
 }
 #endif /* Py_TRACE_REFS */

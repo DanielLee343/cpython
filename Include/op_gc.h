@@ -1,4 +1,4 @@
-#pragma once
+// #pragma once
 #ifndef OP_GC_H
 #define OP_GC_H
 #include <stdint.h>

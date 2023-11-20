@@ -4,7 +4,6 @@
 extern "C"
 {
 #endif
-
     /* Object and type object interface */
 
     /*
@@ -52,6 +51,11 @@ extern "C"
     */
 
 #include "pystats.h"
+// #undef CUCKOO_TABLE_NAME
+// #undef CUCKOO_KEY_TYPE
+// #undef CUCKOO_MAPPED_TYPE
+// #include "op_gc.h"
+// extern op_gc_table *global_op_table;
 
 /* Py_DEBUG implies Py_REF_DEBUG. */
 #if defined(Py_DEBUG) && !defined(Py_REF_DEBUG)
@@ -463,6 +467,8 @@ check by comparing the reference count field to the immortality reference count.
     PyAPI_DATA(volatile short) terminate_flag_refchain;
     PyAPI_FUNC(void *) thread_trace_from_refchain(void *arg);
 
+    PyAPI_FUNC(void *) print_obj_count(void *arg);
+
     /*
     Type flags (tp_flags)
 
@@ -627,6 +633,7 @@ check by comparing the reference count field to the immortality reference count.
 #endif // Py_REF_DEBUG && !Py_LIMITED_API
 
     PyAPI_FUNC(void) _Py_Dealloc(PyObject *);
+    PyAPI_FUNC(void) insert_global_op_table(PyObject *);
 
     /*
     These are provided as conveniences to Python runtime embedders, so that
@@ -671,7 +678,9 @@ check by comparing the reference count field to the immortality reference count.
         return;
     }
     op->ob_refcnt++;
+
 #endif
+    // insert_global_op_table(op);
     _Py_INCREF_STAT_INC();
 #ifdef Py_REF_DEBUG
     _Py_INCREF_IncRefTotal();

@@ -2,7 +2,10 @@
 #define ALL_HEATS_H
 #include <time.h>
 #include <stdint.h>
-typedef struct { struct timespec ts; int scan_idx;} ts_blob;
+typedef struct
+{
+    struct timespec ts;
+} ts_blob;
 // typedef struct { char blob[255]; } mapped_blob;
 
 #define CUCKOO_TABLE_NAME all_heats_table
