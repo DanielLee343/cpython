@@ -2663,6 +2663,11 @@ void update_recursive(PyObject *each_op, cur_heats_table *table)
     PyObject *inner_op;
     while ((inner_op = PyIter_Next(iterable)))
     {
+        // if (_Py_IsImmortal(inner_op))
+        // {
+        //     PyObject_Print(inner_op, stderr, 1);
+        //     fprintf(stderr, "%ld in cascading\n", (uintptr_t)inner_op);
+        // }
         uintptr_t inner_op_casted = (uintptr_t)inner_op;
         // uint8_t dummy_val;
         // Temperature dummy_temp_;
@@ -3279,6 +3284,11 @@ void *thread_trace_from_gc_list(void *arg)
                 each_op = *op_gc_table_iterator_key(op_gc_it);
                 cur_heats_table_insert(curHeats, &each_op, &dummy_temp);
                 PyObject *container_op = (PyObject *)each_op;
+                // if (_Py_IsImmortal(container_op))
+                // // {
+                // PyObject_Print(container_op, stderr, 1);
+                // fprintf(stderr, " in container list\n");
+                // }
                 update_recursive(container_op, curHeats); // inserts dummy_temp here
             }
             PyGILState_Release(gstate);

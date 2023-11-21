@@ -976,14 +976,14 @@ extern "C"
         }
 
         PyThreadState *tstate;
-        status = pycore_create_interpreter(runtime, config, &tstate);
+        status = pycore_create_interpreter(runtime, config, &tstate); // _PyGC_InitState() inside
         if (_PyStatus_EXCEPTION(status))
         {
             return status;
         }
         *tstate_p = tstate;
 
-        status = pycore_interp_init(tstate);
+        status = pycore_interp_init(tstate); // _PyGC_Init() inside
         if (_PyStatus_EXCEPTION(status))
         {
             return status;
