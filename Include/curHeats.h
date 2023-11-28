@@ -1,3 +1,4 @@
+#pragma once
 #ifndef CUR_HEATS_H
 #define CUR_HEATS_H
 #include <stdint.h>

@@ -1,3 +1,4 @@
+#pragma once
 #ifndef ALL_HEATS_H
 #define ALL_HEATS_H
 #include <time.h>
@@ -5,6 +6,7 @@
 typedef struct
 {
     struct timespec ts;
+    int cur_slow_idx;
 } ts_blob;
 // typedef struct { char blob[255]; } mapped_blob;
 
