@@ -3,7 +3,7 @@
 #define CUR_HEATS_H
 #include <stdint.h>
 
-#define NUM_FASTS 20
+#define NUM_FASTS 23 // TODO: how to align this
 typedef struct
 { // Consider bit-wise optimization here to save memory? Since diff is not gonna be very big
     intptr_t prev_refcnt;
@@ -14,7 +14,7 @@ typedef struct
     // intptr_t diff_2;
     // intptr_t diff_1; // 1st fast diff
     intptr_t diffs[NUM_FASTS];
-    unsigned int cur_sizeof;
+    unsigned long cur_sizeof;
 } Temperature;
 
 #define CUCKOO_TABLE_NAME cur_heats_table
