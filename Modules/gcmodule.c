@@ -4085,6 +4085,8 @@ void *use_pref_cnt_modified(void *arg)
     clock_t update_prev_refcnt_start, update_prev_refcnt_end, IO_start, IO_end;
     double update_prev_refcnt_time = 0.0, total_hold_GIL_time = 0.0, whole_IO_time = 0.0, total_capture_hotness_time = 0.0;
     int actual_sleep_dur = 0;
+    op_gc_table *cur_op_gc_table, *changed_op;
+    changed_op = op_gc_table_init(0); // to store objs refcnt get changed
     while (!terminate_flag_refchain)
     {
         // update_prev_refcnt_start = clock();
@@ -4097,7 +4099,6 @@ void *use_pref_cnt_modified(void *arg)
         reset_slow:
             curHeats = cur_heats_table_init(0); // only init curHeats at slow scan
             total_slow_num += 1;
-            op_gc_table *cur_op_gc_table;
             op_gc_table_locked_table *cur_op_gc_locked_table;
             cur_op_gc_table = op_gc_table_init(0);
             fprintf(stderr, "slow peeking...\n");
@@ -4171,6 +4172,7 @@ void *use_pref_cnt_modified(void *arg)
         }
         else
         { // fast
+            uint8_t dummy_val_changed = 0;
             total_fast_num += 1;
             uintptr_t foundInner;
             Temperature *temp_ptr;
@@ -4216,6 +4218,7 @@ void *use_pref_cnt_modified(void *arg)
                     temp_ptr->diffs[1] = op->ob_refcnt - temp_ptr->prev_refcnt;
                     if (temp_ptr->diffs[1] != 0)
                     {
+                        op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
                         // num_changed += 1;
                         if (foundInner > prev_changed_max)
                         {
@@ -4240,10 +4243,11 @@ void *use_pref_cnt_modified(void *arg)
                     {
                         temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
                         temp_ptr->diffs[2] = op->ob_refcnt - temp_ptr->prev_refcnt;
-                        // if (temp_ptr->diffs[2] != 0)
-                        // {
-                        //     num_changed += 1;
-                        // }
+                        if (temp_ptr->diffs[2] != 0)
+                        {
+                            //     num_changed += 1;
+                            op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
+                        }
                         temp_ptr->prev_refcnt = op->ob_refcnt;
                     }
                     else
@@ -4261,16 +4265,18 @@ void *use_pref_cnt_modified(void *arg)
                     temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
                     // temp_ptr->diffs[cur_scan_idx - 1] = op->hotness - temp_ptr->diffs[cur_scan_idx - 2];
                     temp_ptr->diffs[cur_scan_idx - 1] = op->ob_refcnt - temp_ptr->prev_refcnt;
-                    // if (temp_ptr->diffs[cur_scan_idx - 1] != 0)
-                    // {
-                    //     num_changed += 1;
-                    // }
+                    if (temp_ptr->diffs[cur_scan_idx - 1] != 0)
+                    {
+                        op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
+                        // num_changed += 1;
+                    }
                     temp_ptr->prev_refcnt = op->ob_refcnt;
                 }
             }
             cur_heats_table_iterator_free(curHeats_end);
             cur_heats_table_iterator_free(curHeats_it);
             cur_heats_table_locked_table_free(curHeats_locked);
+            fprintf(stderr, "changed size: %ld\n", op_gc_table_size(changed_op));
         }
         // update_prev_refcnt_end = clock();
         gettimeofday(&update_prev_refcnt_end, NULL);
@@ -4362,6 +4368,7 @@ void *use_pref_cnt_modified(void *arg)
 
     all_heats_table_locked_table_free(allHeats_locked);
     all_heats_table_free(allHeats);
+    op_gc_table_free(changed_op);
     terminate_flag_refchain = 0;
     fprintf(stderr, "finish bookkeeping, shutdown\n");
     return NULL;
