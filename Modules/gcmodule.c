@@ -2678,7 +2678,7 @@ void update_recursive(PyObject *each_op, cur_heats_table *table)
             // fprintf(stderr, "found dupped %p\n", inner_op);
             continue;
         }
-        // inner_op->hotness = 0;
+        inner_op->hotness = 0;
         update_recursive(inner_op, table);
         Py_DECREF(inner_op);
     }
@@ -4086,7 +4086,6 @@ void *use_pref_cnt_modified(void *arg)
     double update_prev_refcnt_time = 0.0, total_hold_GIL_time = 0.0, whole_IO_time = 0.0, total_capture_hotness_time = 0.0;
     int actual_sleep_dur = 0;
     op_gc_table *cur_op_gc_table, *changed_op;
-    changed_op = op_gc_table_init(0); // to store objs refcnt get changed
     while (!terminate_flag_refchain)
     {
         // update_prev_refcnt_start = clock();
@@ -4097,6 +4096,7 @@ void *use_pref_cnt_modified(void *arg)
         if (cur_scan_idx == 0)
         {
         reset_slow:
+            changed_op = op_gc_table_init(0);   // to store objs refcnt get changed
             curHeats = cur_heats_table_init(0); // only init curHeats at slow scan
             total_slow_num += 1;
             op_gc_table_locked_table *cur_op_gc_locked_table;
@@ -4144,7 +4144,7 @@ void *use_pref_cnt_modified(void *arg)
                 foundInner = *op_gc_table_iterator_key(op_gc_it);
                 cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
                 PyObject *container_op = (PyObject *)foundInner;
-                // container_op->hotness = 0; // added for hotness
+                container_op->hotness = 0; // added for hotness
                 update_recursive(container_op, curHeats);
             }
             PyGILState_Release(gstate);
@@ -4203,7 +4203,7 @@ void *use_pref_cnt_modified(void *arg)
                     //         prev_changed_min = foundInner;
                     //     }
                     // }
-                    temp_ptr->prev_refcnt = op->ob_refcnt; // immediately upodate pref_refcnt here
+                    temp_ptr->prev_refcnt = op->hotness; // immediately upodate pref_refcnt here
                 }
             }
             else if (cur_scan_idx == 2)
@@ -4214,8 +4214,8 @@ void *use_pref_cnt_modified(void *arg)
                     foundInner = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)foundInner;
                     temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-                    // temp_ptr->diffs[1] = op->hotness - temp_ptr->diffs[0]; // only stores diff
-                    temp_ptr->diffs[1] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                    // temp_ptr->diffs[1] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                    temp_ptr->diffs[1] = op->hotness - temp_ptr->prev_refcnt;
                     if (temp_ptr->diffs[1] != 0)
                     {
                         op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
@@ -4229,7 +4229,7 @@ void *use_pref_cnt_modified(void *arg)
                             prev_changed_min = foundInner;
                         }
                     }
-                    temp_ptr->prev_refcnt = op->ob_refcnt;
+                    temp_ptr->prev_refcnt = op->hotness;
                 }
             }
             else if (cur_scan_idx == 3)
@@ -4242,13 +4242,14 @@ void *use_pref_cnt_modified(void *arg)
                     if (foundInner > prev_changed_min && foundInner < prev_changed_max)
                     {
                         temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-                        temp_ptr->diffs[2] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                        // temp_ptr->diffs[2] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                        temp_ptr->diffs[2] = op->hotness - temp_ptr->prev_refcnt;
                         if (temp_ptr->diffs[2] != 0)
                         {
                             //     num_changed += 1;
                             op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
                         }
-                        temp_ptr->prev_refcnt = op->ob_refcnt;
+                        temp_ptr->prev_refcnt = op->hotness;
                     }
                     else
                     { // filter out those outside boundary
@@ -4263,14 +4264,14 @@ void *use_pref_cnt_modified(void *arg)
                     foundInner = *cur_heats_table_iterator_key(curHeats_it);
                     PyObject *op = (PyObject *)foundInner;
                     temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-                    // temp_ptr->diffs[cur_scan_idx - 1] = op->hotness - temp_ptr->diffs[cur_scan_idx - 2];
-                    temp_ptr->diffs[cur_scan_idx - 1] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                    // temp_ptr->diffs[cur_scan_idx - 1] = op->ob_refcnt - temp_ptr->prev_refcnt;
+                    temp_ptr->diffs[cur_scan_idx - 1] = op->hotness - temp_ptr->prev_refcnt;
                     if (temp_ptr->diffs[cur_scan_idx - 1] != 0)
                     {
                         op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
                         // num_changed += 1;
                     }
-                    temp_ptr->prev_refcnt = op->ob_refcnt;
+                    temp_ptr->prev_refcnt = op->hotness;
                 }
             }
             cur_heats_table_iterator_free(curHeats_end);
@@ -4308,6 +4309,7 @@ void *use_pref_cnt_modified(void *arg)
         if (++cur_scan_idx == rescan_thresh)
         {
             cur_scan_idx = 0;
+            op_gc_table_free(changed_op);
         }
     } // while not terminated
     if (doIO_)
@@ -4368,7 +4370,7 @@ void *use_pref_cnt_modified(void *arg)
 
     all_heats_table_locked_table_free(allHeats_locked);
     all_heats_table_free(allHeats);
-    op_gc_table_free(changed_op);
+    // op_gc_table_free(changed_op);
     terminate_flag_refchain = 0;
     fprintf(stderr, "finish bookkeeping, shutdown\n");
     return NULL;
