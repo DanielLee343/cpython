@@ -4,8 +4,8 @@ make clean
 rm -rf build
 rm -rf python
 
-./configure
-sleep 1
+# ./configure
+# sleep 1
 
 echo "starting building..."
 make -j48

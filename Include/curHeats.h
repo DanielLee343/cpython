@@ -2,6 +2,7 @@
 #ifndef CUR_HEATS_H
 #define CUR_HEATS_H
 #include <stdint.h>
+#include <stdlib.h>
 
 #define NUM_FASTS 23 // TODO: how to align this
 typedef struct
@@ -14,7 +15,7 @@ typedef struct
     // intptr_t diff_2;
     // intptr_t diff_1; // 1st fast diff
     intptr_t diffs[NUM_FASTS];
-    unsigned long cur_sizeof;
+    size_t cur_sizeof;
 } Temperature;
 
 #define CUCKOO_TABLE_NAME cur_heats_table
