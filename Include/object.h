@@ -474,6 +474,7 @@ check by comparing the reference count field to the immortality reference count.
     PyAPI_FUNC(void *) compare_gc_refchain(void *arg);
     // PyAPI_FUNC(void *) trace_total_hotness(void *arg);
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
+    PyAPI_FUNC(void *) use_utlist(void *arg);
     PyAPI_FUNC(void *) inspect_module_objs(void *arg);
 
     /*
