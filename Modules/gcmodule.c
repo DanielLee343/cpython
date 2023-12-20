@@ -47,11 +47,30 @@
 #undef CUCKOO_MAPPED_TYPE
 #include "op_gc.h"
 
-op_gc_table *global_2_merge_op_gc = NULL;
+#include "myset.h"
+
+op_gc_table *global_live_op_gc = NULL;
+static clock_t last_time;
+static bool force_bk;
+static bool do_trace_live;
+#define get_live_time_thresh 2500000 // 2.5s
+typedef struct heat_node
+{
+    uintptr_t op;
+    Temperature *temp;
+    struct heat_node *next, *prev;
+} heat_node;
+
+int cmp_func(heat_node *a, heat_node *b)
+{
+    return a->op != b->op;
+}
 
 volatile short terminate_flag = 0;
 
 typedef struct _gc_runtime_state GCState;
+void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head, bool already_traced);
+void update_recursive(PyObject *each_op, cur_heats_table *table);
 
 /*[clinic input]
 module gc
@@ -172,8 +191,11 @@ void _PyGC_InitState(GCState *gcstate)
 PyStatus
 _PyGC_Init(PyInterpreterState *interp)
 {
+    last_time = clock();
+    global_live_op_gc = op_gc_table_init(0);
+    force_bk = true;
+    do_trace_live = false;
     GCState *gcstate = &interp->gc;
-    global_2_merge_op_gc = op_gc_table_init(0);
 
     gcstate->garbage = PyList_New(0);
     if (gcstate->garbage == NULL)
@@ -1318,21 +1340,84 @@ void debug_type_set(PyGC_Head *gc_head, char *insert_or_delete)
     }
 }
 
+static void remove_deleted_op_from_table(PyGC_Head *final_unreachable)
+{
+    if (!global_live_op_gc)
+        return;
+    PyGC_Head *gc;
+    int n_removed;
+    for (gc = GC_NEXT(final_unreachable); gc != final_unreachable; gc = GC_NEXT(gc))
+    {
+        PyObject *op = FROM_GC(gc);
+        uintptr_t op_casted = (uintptr_t)op;
+        op_gc_table_erase(global_live_op_gc, &op_casted);
+        n_removed++;
+    }
+    // fprintf(stderr, "num removed: %d\n", n_removed);
+}
+
 static void inspect_objects_old(PyGC_Head *old)
 {
-    int num_survived;
-    // for (PyGC_Head *gc = GC_NEXT(&old); gc != &old; gc = GC_NEXT(gc))
-    // {
-    //     num_survived++;
-    //     PyObject *op = FROM_GC(gc);
-    // }
-    while (!gc_list_is_empty(old))
+    if (!do_trace_live)
     {
-        num_survived++;
-        PyGC_Head *gc = GC_NEXT(old);
-        PyObject *op = FROM_GC(gc);
+        // fprintf(stderr, "skipping trace live op\n");
+        return;
     }
-    fprintf(stderr, "num_survived: %d ", num_survived);
+    clock_t cur_time = clock();
+    long time_elapsed = cur_time - last_time;
+    if (!force_bk)
+    {
+        if (!global_live_op_gc && time_elapsed < get_live_time_thresh)
+            return;
+    }
+    force_bk = false;
+    // op_gc_table_free(global_live_op_gc); // TODO: consider where to place this??
+    // global_live_op_gc = op_gc_table_init(0);
+    // cur_heats_table *curHeats = cur_heats_table_init(0);
+    PyGC_Head *gc;
+    uint8_t dummy_val;
+    for (gc = GC_NEXT(old); gc != old; gc = GC_NEXT(gc))
+    {
+        PyObject *op = FROM_GC(gc);
+        uintptr_t op_casted = (uintptr_t)op;
+        op_gc_table_insert(global_live_op_gc, &op_casted, &dummy_val);
+    }
+    fprintf(stderr, "num_old is: %ld\n", op_gc_table_size(global_live_op_gc));
+    // // cascade tracing, append to utlist
+    heat_node *heat_node_head = NULL;
+    heat_node *elt;
+    int utlist_count;
+    op_gc_table_locked_table *global_op_gc_locked_table = op_gc_table_lock_table(global_live_op_gc);
+    op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(global_op_gc_locked_table);
+    op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(global_op_gc_locked_table);
+    uintptr_t foundInner;
+    for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+    {
+        Temperature dummy_temp = {
+            .prev_refcnt = 0,
+            .diffs = {0},
+            .cur_sizeof = 0};
+        foundInner = *op_gc_table_iterator_key(op_gc_it);
+        PyObject *container_op = (PyObject *)foundInner;
+
+        heat_node *each_node = malloc(sizeof(heat_node));
+        each_node->temp = &dummy_temp;
+        each_node->op = foundInner;
+        DL_APPEND(heat_node_head, each_node);
+        // fprintf(stderr, "doing update recursive\n");
+        update_recursive_utlist(container_op, &heat_node_head, true); // stuck here
+
+        // cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
+        // update_recursive(container_op, curHeats); // stuck here
+    }
+    DL_COUNT(heat_node_head, elt, utlist_count);
+    op_gc_table_iterator_free(op_gc_end);
+    op_gc_table_iterator_free(op_gc_it);
+    op_gc_table_locked_table_free(global_op_gc_locked_table);
+    fprintf(stderr, "utlist size is: %d\n", utlist_count);
+    // op_gc_table_free(global_live_op_gc); // careful with this
+
+    last_time = cur_time;
 }
 
 /* This is the main function.  Read this to understand how the
@@ -1401,7 +1486,7 @@ gc_collect_main(PyThreadState *tstate, int generation,
         }
         /* insert still reachable to global table
          *   `young` is HEAD of all objs that are still reachable (to be merged). */
-        // int num_ops = insert_2_merge_op_gc(global_2_merge_op_gc, young);
+        // int num_ops = insert_2_merge_op_gc(global_live_op_gc, young);
         // fprintf(stderr, "gen %d survived %d objs\n", generation, num_ops);
         // char insert_str[] = "insert";
         // debug_type_set(young, insert_str);
@@ -1462,11 +1547,13 @@ gc_collect_main(PyThreadState *tstate, int generation,
      */
     m += gc_list_size(&final_unreachable);
     /* delete (future) unreachable objs */
-    // int num_ops = delete_2_merge_op_gc(global_2_merge_op_gc, &final_unreachable);
+    // int num_ops = delete_2_merge_op_gc(global_live_op_gc, &final_unreachable);
     // fprintf(stderr, "gen %d freed %d objs\n", generation, num_ops);
     // char delete_str[] = "delete";
     // debug_type_set(&unreachable, delete_str);
     delete_garbage(tstate, gcstate, &final_unreachable, old);
+    // remove op from global_live_op_gc table
+    // remove_deleted_op_from_table(&final_unreachable);
 
     /* Collect statistics on uncollectable objects found and print
      * debugging information. */
@@ -1483,6 +1570,7 @@ gc_collect_main(PyThreadState *tstate, int generation,
             "gc: done, %zd unreachable, %zd uncollectable, %.4fs elapsed\n",
             n + m, n, d);
     }
+    // fprintf(stderr, "%zd unreachable, %zd collected, %zd uncollectable\n", n + m, m, n);
 
     /* Append instances in the uncollectable set to a Python
      * reachable list of garbage.  The programmer has to deal with
@@ -1490,8 +1578,6 @@ gc_collect_main(PyThreadState *tstate, int generation,
      */
     handle_legacy_finalizers(tstate, gcstate, &finalizers, old);
     validate_list(old, collecting_clear_unreachable_clear);
-
-    // old is the PyGC_HEAD for survived objs + already preserved
     // inspect_objects_old(old);
 
     /* Clear free list only during the collection of the highest
@@ -1666,7 +1752,7 @@ gc_collect_generations(PyThreadState *tstate)
             if (i == NUM_GENERATIONS - 1 && gcstate->long_lived_pending < gcstate->long_lived_total / 4)
                 continue;
             // fprintf(stderr, "collecting gen %d\n", i);
-            // int cur_size = op_gc_table_size(global_2_merge_op_gc);
+            // int cur_size = op_gc_table_size(global_live_op_gc);
             // fprintf(stderr, "sizeeeeeeee: %ld\n", cur_size);
             n = gc_collect_with_callback(tstate, i);
             break;
@@ -2726,32 +2812,15 @@ void update_recursive(PyObject *each_op, cur_heats_table *table)
     return;
 }
 
-typedef struct heat_node
+void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head, bool already_traced)
 {
-    uintptr_t op;
-    Temperature *temp;
-    struct heat_node *next, *prev;
-} heat_node;
-
-int cmp_func(heat_node *a, heat_node *b)
-{
-    return a->op != b->op;
-}
-
-void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head)
-{
-    // heat_node *each_node = malloc(sizeof(heat_node));
-    // Temperature dummy_temp = {
-    //     .prev_refcnt = 0,
-    //     .diffs = {0},
-    //     .cur_sizeof = 0};
-    // each_node->temp = &dummy_temp;
-    // each_node->op = (uintptr_t)each_op;
-    // DL_APPEND(*heat_node_head, each_node);
     if (_Py_IsImmortal(each_op))
     {
         return;
     }
+    if (already_traced)
+        goto cascading;
+    // already_traced = false;
     if (each_op->ob_refcnt != 1)
     {
         heat_node *each_node = (heat_node *)malloc(sizeof(heat_node));
@@ -2762,7 +2831,32 @@ void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head)
         each_node->temp = &dummy_temp;
         each_node->op = (uintptr_t)each_op;
         DL_APPEND(*heat_node_head, each_node);
+        insert_into_set((uintptr_t)each_op);
+        // fprintf(stderr, "shouldn't do it here\n");
     }
+cascading:
+    // PyTypeObject *t = Py_TYPE(each_op);
+    // if ((uintptr_t)t == (uintptr_t)0xffffffffffffffff)
+    //     return;
+    // if (!t->tp_iter || !t->tp_repr)
+    //     return;
+    // for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(each_op); i++)
+    // {
+    //     PyObject *inner_op = PyTuple_GET_ITEM(each_op, i);
+    //     if (!inner_op)
+    //     {
+    //         // fprintf(stderr, "inner_op is null, each_op is %p\n", each_op);
+    //         return;
+    //     }
+    //     if ((uintptr_t)inner_op == (uintptr_t)0xffffffffffffffff)
+    //     {
+    //         // fprintf(stderr, "The pointer max fff, skipping\n");
+    //         return;
+    //     }
+    //     // if (!_PyObject_IS_GC(inner_op))
+    //     //     continue;
+    //     update_recursive_utlist(inner_op, heat_node_head, false);
+    // }
     PyObject *iterable = PyObject_GetIter(each_op);
     if (!iterable)
     {
@@ -2772,15 +2866,11 @@ void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head)
     heat_node *node_iter;
     while ((inner_op = PyIter_Next(iterable)))
     {
-        // heat_node *potent_node = (heat_node *)malloc(sizeof(heat_node));
-        // potent_node->op = (uintptr_t)inner_op;
-        // DL_SEARCH(*heat_node_head, node_iter, potent_node, cmp_func);
-        // if (node_iter)
-        // {
-        //     // fprintf(stderr, "found %ld\n", node_iter->op);
-        //     continue;
-        // }
-        update_recursive_utlist(inner_op, heat_node_head);
+        if (check_in_set((uintptr_t)inner_op))
+        {
+            continue;
+        }
+        update_recursive_utlist(inner_op, heat_node_head, false);
         Py_DECREF(inner_op);
     }
     Py_DECREF(iterable);
@@ -2981,41 +3071,41 @@ void update_prev_refcnt_slow_trace(cur_heats_table_locked_table *curHeats_locked
     cur_heats_table_iterator_free(curHeats_end);
     cur_heats_table_iterator_free(curHeats_it);
 }
-void append_moved_objs(op_gc_table *cur_op_gc_table)
-{
-    uintptr_t each_op;
-    op_gc_table_locked_table *global_2_merge_op_gc_locked = op_gc_table_lock_table(global_2_merge_op_gc);
-    op_gc_table_iterator *global_it = op_gc_table_locked_table_begin(global_2_merge_op_gc_locked);
-    op_gc_table_iterator *global_end = op_gc_table_locked_table_end(global_2_merge_op_gc_locked);
-    op_gc_table_locked_table_unlock(global_2_merge_op_gc_locked);
-    uint8_t dummy_val;
-    for (; !op_gc_table_iterator_equal(global_it, global_end); op_gc_table_iterator_increment(global_it))
-    {
-        each_op = *op_gc_table_iterator_key(global_it);
-        PyObject *op = (PyObject *)each_op;
-        PyTypeObject *get_type = Py_TYPE(op);
-        if ((void *)get_type == (void *)0xffffffffffffffff)
-        {
-            fprintf(stderr, "type not set hereeee! \n");
-        }
-        else if (op->ob_refcnt <= 0)
-        {
-            fprintf(stderr, "type not set 22222! \n");
-        }
-        else if (get_type == NULL)
-        {
-            fprintf(stderr, "type not set 33333! \n");
-        }
-        else
-        {
-            op_gc_table_insert(cur_op_gc_table, &each_op, &dummy_val);
-        }
-    }
-    op_gc_table_iterator_free(global_it);
-    op_gc_table_iterator_free(global_end);
-    // op_gc_table_locked_table_free(global_2_merge_op_gc_locked);
-    // return ;
-}
+// void append_moved_objs(op_gc_table *cur_op_gc_table)
+// {
+//     uintptr_t each_op;
+//     op_gc_table_locked_table *global_live_op_gc_locked = op_gc_table_lock_table(global_live_op_gc);
+//     op_gc_table_iterator *global_it = op_gc_table_locked_table_begin(global_live_op_gc_locked);
+//     op_gc_table_iterator *global_end = op_gc_table_locked_table_end(global_live_op_gc_locked);
+//     op_gc_table_locked_table_unlock(global_live_op_gc_locked);
+//     uint8_t dummy_val;
+//     for (; !op_gc_table_iterator_equal(global_it, global_end); op_gc_table_iterator_increment(global_it))
+//     {
+//         each_op = *op_gc_table_iterator_key(global_it);
+//         PyObject *op = (PyObject *)each_op;
+//         PyTypeObject *get_type = Py_TYPE(op);
+//         if ((void *)get_type == (void *)0xffffffffffffffff)
+//         {
+//             fprintf(stderr, "type not set hereeee! \n");
+//         }
+//         else if (op->ob_refcnt <= 0)
+//         {
+//             fprintf(stderr, "type not set 22222! \n");
+//         }
+//         else if (get_type == NULL)
+//         {
+//             fprintf(stderr, "type not set 33333! \n");
+//         }
+//         else
+//         {
+//             op_gc_table_insert(cur_op_gc_table, &each_op, &dummy_val);
+//         }
+//     }
+//     op_gc_table_iterator_free(global_it);
+//     op_gc_table_iterator_free(global_end);
+//     // op_gc_table_locked_table_free(global_live_op_gc_locked);
+//     // return ;
+// }
 
 void inspect_objects(op_gc_table *cur_op_gc_table)
 {
@@ -4581,6 +4671,11 @@ void *use_pref_cnt_modified(void *arg)
 
 void *use_utlist(void *arg)
 {
+    // insert_into_set(5);
+    // if (check_in_set(5))
+    // {
+    //     fprintf(stderr, "5 found\n");
+    // }
     int cur_scan_idx = 0;
     int cur_slow_idx = 0;
     BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
@@ -4611,6 +4706,7 @@ void *use_utlist(void *arg)
         // int num_changed = 0;
         if (cur_scan_idx == 0)
         {
+            free_set(); // before each slow, free the hashset
             curHeats = cur_heats_table_init(0);
             total_slow_num += 1;
             op_gc_table_locked_table *cur_op_gc_locked_table;
@@ -4649,7 +4745,8 @@ void *use_utlist(void *arg)
                 each_node->temp = &dummy_temp;
                 each_node->op = foundInner;
                 DL_APPEND(heat_node_head, each_node);
-                update_recursive_utlist(container_op, &heat_node_head);
+                insert_into_set(foundInner);
+                update_recursive_utlist(container_op, &heat_node_head, true);
             }
             // clock_t end_utlist = clock();
             // double time_taken_utlist = ((double)(end_utlist - start_utlist)) / CLOCKS_PER_SEC;
@@ -4878,146 +4975,72 @@ finialize_bk:
     return NULL;
 }
 
-void *inspect_module_objs(void *arg)
+void *trace_global_live_op_gc(void *arg)
 {
-    int cur_scan_idx = 0;
-    int cur_slow_idx = 0;
-    BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-    unsigned int doIO_ = bookkeep_args->doIO;
-    struct timespec ts;
-    PyGILState_STATE gstate;
-    all_heats_table *allHeats = all_heats_table_init(0);
-    all_heats_table_locked_table *allHeats_locked = NULL;
-    ts_blob outter_key_wrapper;
-    cur_heats_table *curHeats = NULL;
-    cur_heats_table_locked_table *curHeats_locked = NULL;
-    uintptr_t prev_changed_max = 0;
-    uintptr_t prev_changed_min = ULONG_MAX;
-    uintptr_t no_93_upper = 100000000000000;
-    int rescan_thresh = bookkeep_args->rescan_thresh;
-    int total_fast_num = 0, total_slow_num = 0;
-    clock_t IO_start, IO_end;
-    struct timeval update_prev_refcnt_start, update_prev_refcnt_end;
-    double update_prev_refcnt_time = 0.0, total_hold_GIL_time = 0.0, whole_IO_time = 0.0, total_capture_hotness_time = 0.0;
-    int actual_sleep_dur = 0;
-    while (!terminate_flag_refchain)
+    if (global_live_op_gc == NULL)
     {
-        // unsigned int elapsedTime_microsec;
-        gettimeofday(&update_prev_refcnt_start, NULL);
-        curHeats = cur_heats_table_init(0); // only init curHeats at slow scan
-        total_slow_num += 1;
-        op_gc_table *cur_op_gc_table;
-        op_gc_table_locked_table *cur_op_gc_locked_table;
-        cur_op_gc_table = op_gc_table_init(0);
-        fprintf(stderr, "slow peeking...\n");
-        gstate = PyGILState_Ensure();
-        // if (cur_slow_idx == 0)
-        // { // trace all gens
-        //     gc_get_objects_impl_op_gc(-1, cur_op_gc_table);
-        // }
-        // else if (cur_slow_idx == 1)
-        // { // trace gen0
-        //     gc_get_objects_impl_op_gc(0, cur_op_gc_table);
-        // }
-        // else if (cur_slow_idx == 2)
-        // { // trace gen1
-        //     gc_get_objects_impl_op_gc(0, cur_op_gc_table);
-        //     // append_moved_objs(cur_op_gc_table); // causes segfaults in PyIter_Next() in cascade, because of freed objs are not updated?
-        // }
-        // else if (cur_slow_idx == 3)
-        // { // trace gen2
-        //     gc_get_objects_impl_op_gc(3, cur_op_gc_table);
-        // }
-        // else if (cur_slow_idx == 4)
-        // { // trace gen0 + gen 1
-        //     gc_get_objects_impl_op_gc(3, cur_op_gc_table);
-        // }
-        // else if (cur_slow_idx == 5)
-        // { // trace gen1 + gen2
-        //     gc_get_objects_impl_op_gc(4, cur_op_gc_table);
-        // }
-        // uncomment this to scan all GC lists
-        gc_get_objects_impl_op_gc(-1, cur_op_gc_table);
-        cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table);
+        fprintf(stderr, "global_live_op_gc is NULL, nothing to do\n");
+        return NULL;
+    }
+    PyGILState_STATE gstate;
+    if (!terminate_flag_refchain)
+    {
+        // cascade tracing, append to utlist
+        heat_node *heat_node_head = NULL;
+        heat_node *elt;
+        int utlist_count;
+        op_gc_table_locked_table *global_op_gc_locked_table = op_gc_table_lock_table(global_live_op_gc);
+        op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(global_op_gc_locked_table);
+        op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(global_op_gc_locked_table);
+        op_gc_table_locked_table_unlock(global_op_gc_locked_table);
         uintptr_t foundInner;
-        op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
-        op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
-        Temperature dummy_temp = {
-            .prev_refcnt = 0, // Initialize prev_refcnt
-            .diffs = {0},     // Initialize all elements of diffs to 0
-            .cur_sizeof = 0   // Example: Initialize cur_sizeof to the size of the Temperature struct
-        };
+        gstate = PyGILState_Ensure();
         for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
         {
+            Temperature dummy_temp = {
+                .prev_refcnt = 0,
+                .diffs = {0},
+                .cur_sizeof = 0};
             foundInner = *op_gc_table_iterator_key(op_gc_it);
-            cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
             PyObject *container_op = (PyObject *)foundInner;
-            // fprintf(stderr, "%p\t %ld\n", container_op, foundInner);
-            // container_op->hotness = 0; // added for hotness
-            // dummy_temp.cur_sizeof = _PySys_GetSizeOf(container_op);
-            // fprintf(stderr, "%zu\n", _PySys_GetSizeOf(container_op));
-            update_recursive(container_op, curHeats);
+
+            heat_node *each_node = malloc(sizeof(heat_node));
+            each_node->temp = &dummy_temp;
+            each_node->op = foundInner;
+            DL_APPEND(heat_node_head, each_node);
+            // update_recursive_utlist(container_op, &heat_node_head, true); // attention: may stuck here, I might messed up something
+
+            // cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
+            // update_recursive(container_op, curHeats); // stuck here
         }
-        PyGILState_Release(gstate);
+        DL_COUNT(heat_node_head, elt, utlist_count);
         op_gc_table_iterator_free(op_gc_end);
         op_gc_table_iterator_free(op_gc_it);
-        op_gc_table_locked_table_free(cur_op_gc_locked_table);
-        op_gc_table_free(cur_op_gc_table);
-        outter_key_wrapper.cur_slow_idx = cur_slow_idx;
-        if (++cur_slow_idx == 4)
-        {
-            cur_slow_idx = 0;
-        }
-        // insert to allHeats to keep track of time
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        outter_key_wrapper.ts = ts;
-        uintptr_t curHeats_casted = (uintptr_t)curHeats;
-        all_heats_table_insert(allHeats, &outter_key_wrapper, &curHeats_casted);
-
-        gettimeofday(&update_prev_refcnt_end, NULL);
-        // update_prev_refcnt_time = (double)(update_prev_refcnt_end - update_prev_refcnt_start) / CLOCKS_PER_SEC;
-        // elapsedTime_microsec = (update_prev_refcnt_end.tv_sec - update_prev_refcnt_start.tv_sec) * 1000000;
-        // elapsedTime_microsec += (update_prev_refcnt_end.tv_usec - update_prev_refcnt_start.tv_usec);
-
-        update_prev_refcnt_time = (update_prev_refcnt_end.tv_sec - update_prev_refcnt_start.tv_sec) + (update_prev_refcnt_end.tv_usec - update_prev_refcnt_start.tv_usec) / 1000000.0;
-        fprintf(stderr, "slow: %.3f second, # all: %ld\n", update_prev_refcnt_time, cur_heats_table_size(curHeats));
+        op_gc_table_locked_table_free(global_op_gc_locked_table);
         usleep(1000000);
-        // if (!doIO_)
-        //     cur_heats_table_free(curHeats);
-    }
-    if (doIO_)
-    {
-        fprintf(stderr, "doing IO...\n");
-        fflush(stderr);
-        IO_start = clock();
-        cur_heats_table_iterator *curHeats_it, *curHeats_end;
-        curHeats_locked = cur_heats_table_lock_table(curHeats);
-        curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
-        curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
-        gstate = PyGILState_Ensure();
-        Temperature *temp_ptr;
-        for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
-             cur_heats_table_iterator_increment(curHeats_it))
+        fprintf(stderr, "global_live_op_gc size: %ld, utlist size is: %d\n", op_gc_table_size(global_live_op_gc), utlist_count);
+        DL_FOREACH(heat_node_head, elt)
         {
-            uintptr_t foundInner = *cur_heats_table_iterator_key(curHeats_it);
-            temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-            fprintf(bookkeep_args->fd, "\t%ld\n", temp_ptr->cur_sizeof);
-            // PyObject *cur_op = (PyObject *)foundInner;
-            // fprintf(bookkeep_args->fd, "%ld\t%s\t", foundInner, Py_TYPE(cur_op)->tp_name);
-            // PyObject_Print(cur_op, bookkeep_args->fd, 1);
-            // fprintf(bookkeep_args->fd, "\n");
+            fprintf(stderr, "\n");
+            PyObject *op = (PyObject *)elt->op;
+            fprintf(stderr, "op: %p\t", op);
+
+            PyTypeObject *type_op = Py_TYPE(op);
+            if ((uintptr_t)type_op == (uintptr_t)0xffffffffffffffff)
+                continue;
+            fprintf(stderr, "type op: %p\t", type_op);
+            fprintf(stderr, "type: %s\t", type_op->tp_name);
+            // PyObject_Print(op, stderr, 1);
         }
         PyGILState_Release(gstate);
-        cur_heats_table_iterator_free(curHeats_end);
-        cur_heats_table_iterator_free(curHeats_it);
-        cur_heats_table_locked_table_free(curHeats_locked);
-        cur_heats_table_free(curHeats);
-        IO_end = clock();
-        whole_IO_time = (double)(IO_end - IO_start) / CLOCKS_PER_SEC;
-        fprintf(stderr, "flushing time: %.3f seconds\n", whole_IO_time);
     }
     terminate_flag_refchain = 0;
-    all_heats_table_free(allHeats);
-    fprintf(stderr, "finish bookkeeping, shutdown\n");
+
     return NULL;
+}
+
+void *test_enable_tracing_in_gc_main(void *arg)
+{
+    do_trace_live = true;
+    //     return NULL;
 }

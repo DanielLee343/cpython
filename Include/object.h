@@ -475,7 +475,8 @@ check by comparing the reference count field to the immortality reference count.
     // PyAPI_FUNC(void *) trace_total_hotness(void *arg);
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
     PyAPI_FUNC(void *) use_utlist(void *arg);
-    PyAPI_FUNC(void *) inspect_module_objs(void *arg);
+    PyAPI_FUNC(void *) trace_global_live_op_gc(void *arg);
+    PyAPI_FUNC(void *) test_enable_tracing_in_gc_main(void *arg);
 
     /*
     Type flags (tp_flags)
@@ -657,7 +658,6 @@ check by comparing the reference count field to the immortality reference count.
 
     static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
     {
-        op->hotness++;
 #if defined(Py_LIMITED_API) && (Py_LIMITED_API + 0 >= 0x030c0000 || defined(Py_REF_DEBUG))
         // Stable ABI implements Py_INCREF() as a function call on limited C API
         // version 3.12 and newer, and on Python built in debug mode. _Py_IncRef()
@@ -689,6 +689,7 @@ check by comparing the reference count field to the immortality reference count.
     op->ob_refcnt++;
 
 #endif
+    op->hotness++;
     _Py_INCREF_STAT_INC();
 #ifdef Py_REF_DEBUG
     _Py_INCREF_IncRefTotal();
@@ -717,7 +718,6 @@ check by comparing the reference count field to the immortality reference count.
 #elif defined(Py_REF_DEBUG)
 static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
 {
-    op->hotness++;
     if (op->ob_refcnt <= 0)
     {
         _Py_NegativeRefcount(filename, lineno, op);
@@ -732,6 +732,7 @@ static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
     {
         _Py_Dealloc(op);
     }
+    op->hotness++;
 }
 #define Py_DECREF(op) Py_DECREF(__FILE__, __LINE__, _PyObject_CAST(op))
 
