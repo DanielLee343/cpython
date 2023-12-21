@@ -187,7 +187,7 @@ check by comparing the reference count field to the immortality reference count.
 #endif
 
             PyTypeObject *ob_type;
-        Py_ssize_t hotness;
+        unsigned long hotness;
         Py_ssize_t padding;
         // Py_ssize_t prev_refcnt;
         // uint32_t cur_op_size;
@@ -475,7 +475,7 @@ check by comparing the reference count field to the immortality reference count.
     // PyAPI_FUNC(void *) trace_total_hotness(void *arg);
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
     PyAPI_FUNC(void *) use_utlist(void *arg);
-    PyAPI_FUNC(void *) trace_global_live_op_gc(void *arg);
+    // PyAPI_FUNC(void *) trace_global_live_op_gc(void *arg);
     PyAPI_FUNC(void *) test_enable_tracing_in_gc_main(void *arg);
 
     /*
