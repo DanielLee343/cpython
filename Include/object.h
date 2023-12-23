@@ -458,6 +458,7 @@ check by comparing the reference count field to the immortality reference count.
         unsigned int doIO;
         int rescan_thresh;
         PyThreadState *mainThreadState;
+        unsigned long live_time_thresh_arg;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
@@ -475,8 +476,7 @@ check by comparing the reference count field to the immortality reference count.
     // PyAPI_FUNC(void *) trace_total_hotness(void *arg);
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
     PyAPI_FUNC(void *) use_utlist(void *arg);
-    // PyAPI_FUNC(void *) trace_global_live_op_gc(void *arg);
-    PyAPI_FUNC(void *) test_enable_tracing_in_gc_main(void *arg);
+    PyAPI_FUNC(void *) manual_trigger_scan(void *arg);
 
     /*
     Type flags (tp_flags)
