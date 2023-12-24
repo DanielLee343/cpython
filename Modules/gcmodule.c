@@ -68,6 +68,19 @@ int cmp_func(heat_node *a, heat_node *b)
     return a->op != b->op;
 }
 
+typedef struct
+{
+    uintptr_t start;
+    uintptr_t end;
+} PyObj_range;
+
+int compareIntervals(const void *a, const void *b)
+{
+    PyObj_range *A = (PyObj_range *)a;
+    PyObj_range *B = (PyObj_range *)b;
+    return A->start - B->end;
+}
+
 volatile short terminate_flag = 0;
 static heat_node *global_heat_utlist;
 
@@ -4938,13 +4951,68 @@ finialize_bk:
 }
 
 /* analyze and drop ops from global_utlist, to speed up fast scans */
-static void analyze_drop_op()
+// static void analyze_drop_op()
+// {
+//     Temperature *temp_ptr;
+//     heat_node *node_ptr, *tmp;
+//     DL_FOREACH(global_heat_utlist, node_ptr)
+//     {
+//     }
+// }
+
+static void mergeIntervals(PyObj_range *intervals, int *size)
 {
-    Temperature *temp_ptr;
-    heat_node *node_ptr, *tmp;
+    if (*size <= 1)
+        return;
+
+    qsort(intervals, *size, sizeof(PyObj_range), compareIntervals); // sort by start addr
+
+    int mergedIndex = 0;
+    for (int i = 1; i < *size; i++)
+    {
+        if (intervals[mergedIndex].end >= intervals[i].start)
+        {
+            intervals[mergedIndex].end = intervals[mergedIndex].end > intervals[i].end ? intervals[mergedIndex].end : intervals[i].end;
+        }
+        else
+        {
+            mergedIndex++;
+            intervals[mergedIndex] = intervals[i];
+        }
+    }
+
+    *size = mergedIndex + 1;
+}
+
+static void calculate_merge(int num_objs)
+{ // merge the hot objs and return an array of pages to migrate
+    heat_node *node_ptr;
+    PyObj_range *pyobj_ranges = malloc(num_objs * sizeof(PyObj_range));
+    int i = 0;
+    // TODO: sanity check, make sure cur_sizeof is positive
     DL_FOREACH(global_heat_utlist, node_ptr)
     {
+        uintptr_t addr_start = (uintptr_t)node_ptr->op;
+        uintptr_t addr_end = (uintptr_t)node_ptr->temp->cur_sizeof + addr_start;
+        pyobj_ranges[i].start = addr_start;
+        pyobj_ranges[i].end = addr_end;
+        i += 1;
     }
+
+    int size = sizeof(pyobj_ranges) / sizeof(pyobj_ranges[0]);
+    assert(size == num_objs);
+
+    mergeIntervals(pyobj_ranges, &size);
+
+    // populate num_pages
+    // int num_pages = 0;
+    // void **pageBoundaries = (void **)malloc(num_pages * sizeof(void *));
+    // int *nodes = malloc(num_pages * sizeof(int));
+    // int *status = malloc(num_pages * sizeof(int));
+    // for (int i = 0; i < num_pages; i++)
+    // {
+    //     nodes[i] = 1;
+    // }
 }
 
 void *manual_trigger_scan(void *arg)
@@ -5089,8 +5157,25 @@ void *manual_trigger_scan(void *arg)
         DL_COUNT(global_heat_utlist, node_ptr, utlist_count);
         fprintf(stderr, "fast %d, # all: %d, cur_fast_time: %.3f\n", fast_scan_idx, utlist_count, cur_fast_time);
         if (++fast_scan_idx == rescan_thresh)
-        {
+        { // last fast scan
             fast_scan_idx = 0;
+            // get cursize
+            // TODO: determine when to migrate? # hot objs remain stable??
+            // while (PyGILState_Check())
+            // {
+            //     // pthread_cond_wait(&cond, &mutex);
+            //     fprintf(stderr, "GIL held by slow, try get sizeof later\n");
+            //     usleep(250000); // 0.25s
+            // }
+            PyGILState_STATE gstate = PyGILState_Ensure();
+            DL_FOREACH(global_heat_utlist, node_ptr)
+            {
+                PyObject *op = node_ptr->op;
+                temp_ptr = node_ptr->temp;
+                temp_ptr->cur_sizeof = _PySys_GetSizeOf(op);
+            }
+            PyGILState_Release(gstate);
+            // calculate_merge(utlist_count);
         }
         // rendezvous_state = 1;
         // pthread_cond_signal(&cond); // signal slow_scan, if pending

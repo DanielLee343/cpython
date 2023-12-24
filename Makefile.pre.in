@@ -82,7 +82,7 @@ MAKESETUP=      $(srcdir)/Modules/makesetup
 OPT=		@OPT@
 BASECFLAGS=	@BASECFLAGS@
 BASECPPFLAGS=	@BASECPPFLAGS@ -I/home/lyuze/workspace/libcuckoo/install/include
-CONFIGURE_CFLAGS=	@CFLAGS@
+CONFIGURE_CFLAGS=	@CFLAGS@ -I/home/lyuze/workspace/uthash/src
 # CFLAGS_NODIST is used for building the interpreter and stdlib C extensions.
 # Use it when a compiler flag should _not_ be part of the distutils CFLAGS
 # once Python is installed (Issue #21121).
@@ -371,6 +371,7 @@ PYTHON_OBJS=	\
 		Python/Python-tokenize.o \
 		Python/allHeats.o \
 		Python/curHeats.o \
+		Python/myset.o \
 		Python/op_gc.o \
 		Python/asdl.o \
 		Python/assemble.o \
@@ -1499,6 +1500,9 @@ Python/curHeats.o: $(srcdir)/Python/curHeats.cpp
 Python/op_gc.o: $(srcdir)/Python/op_gc.cpp
 		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/op_gc.cpp
 
+Python/myset.o: $(srcdir)/Python/myset.cpp
+		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/myset.cpp
+
 Python/importdl.o: $(srcdir)/Python/importdl.c
 		$(CC) -c $(PY_CORE_CFLAGS) -I$(DLINCLDIR) -o $@ $(srcdir)/Python/importdl.c
 
@@ -1814,6 +1818,7 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/allHeats.h \
 		$(srcdir)/Include/curHeats.h \
 		$(srcdir)/Include/op_gc.h \
+		$(srcdir)/Include/myset.h \
 		$(DTRACE_HEADERS) \
 		@PLATFORM_HEADERS@ \
 		\
