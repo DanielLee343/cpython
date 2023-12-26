@@ -1,8 +1,9 @@
 #include <unordered_set>
 #include "../Include/myset.h"
 
-static std::unordered_set<int> mySet;
+static std::unordered_set<uintptr_t> mySet;
 
+// to help dedup op added to utlist
 extern "C" void insert_into_set(uintptr_t value)
 {
     mySet.insert(value);

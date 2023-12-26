@@ -33,6 +33,8 @@
 #include "pydtrace.h"
 
 #include "utlist.h"
+#include <numaif.h>
+#include <numa.h>
 
 #undef CUCKOO_TABLE_NAME
 #undef CUCKOO_KEY_TYPE
@@ -47,14 +49,16 @@
 #undef CUCKOO_MAPPED_TYPE
 #include "op_gc.h"
 
+#include "pages2move.h"
 #include "myset.h"
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 static int rendezvous_state = 1;
 
 static clock_t last_time;
-static bool force_bk;
+static bool enable_bk;
 unsigned long get_live_time_thresh;
+#define PAGE_SIZE 4096
 typedef struct heat_node
 {
     // uintptr_t op;
@@ -209,7 +213,7 @@ PyStatus
 _PyGC_Init(PyInterpreterState *interp)
 {
     last_time = clock();
-    force_bk = true;
+    enable_bk = false;
     get_live_time_thresh = 200000000;
     GCState *gcstate = &interp->gc;
 
@@ -1368,6 +1372,38 @@ static void empty_global_heat_utlist()
     global_heat_utlist = NULL;
 }
 
+int check_object_type(PyObject *obj)
+{
+    PyObject *module = PyImport_ImportModule("io");
+    if (!module)
+    {
+        PyErr_Print();
+    }
+    // const char *io_types[] = {"IOBase", "IncrementalNewlineDecoder", "RawIOBase", "BufferedIOBase", "BufferedRWPair", "BufferedRandom", "BufferedReader",
+    //                           "BufferedWriter", "BytesIOBuffer", "BytesIO", "FileIO", "StringIO", "TextIOBase", "TextIOWrapper", NULL};
+    const char *io_types[] = {"FileIO", "BufferedReader", "BufferedWriter", "TextIOWrapper", NULL};
+    int result = 0;
+    for (int i = 0; io_types[i] != NULL; i++)
+    {
+        PyObject *io_type = PyObject_GetAttrString(module, io_types[i]);
+        // if (!io_type)
+        // {
+        //     PyErr_Print();
+        //     result = -1; // Error getting type
+        //     Py_DECREF(io_type);
+        //     break;
+        // }
+        if (PyObject_IsInstance(obj, io_type))
+        {
+            result = 1;
+            Py_DECREF(io_type);
+            break;
+        }
+        Py_DECREF(io_type);
+    }
+    return result;
+}
+
 static void do_slow_scan()
 {
     // pthread_mutex_lock(&mutex);
@@ -1393,6 +1429,11 @@ static void do_slow_scan()
         Temperature *dummy_temp = malloc(sizeof(Temperature)); // TODO: considering pre-malloc a bunch of dummy_temp at once and assign here, but how much?
         foundInner = *op_gc_table_iterator_key(op_gc_it);
         PyObject *container_op = (PyObject *)foundInner;
+        if (check_object_type(container_op) == 1)
+        {
+            fprintf(stderr, "skipping IO type %ld, type: %s\n", foundInner, container_op->ob_type->tp_name);
+            continue;
+        }
         heat_node *each_node = malloc(sizeof(heat_node));
         each_node->temp = dummy_temp;
         each_node->op = container_op;
@@ -1412,21 +1453,18 @@ static void do_slow_scan()
     // rendezvous_state = 2;
     // pthread_cond_signal(&cond);
     // pthread_mutex_unlock(&mutex);
+    last_time = clock();
 }
 
 static void try_trigger_slow_scan()
 {
+    if (!enable_bk)
+        return;
     clock_t cur_time = clock();
     long time_elapsed = cur_time - last_time;
-    if (!force_bk)
-    { // TODO: consider invoking slow_scan if REALLY needed
-        if (time_elapsed < get_live_time_thresh)
-            return;
-    }
-    force_bk = false;
+    if (time_elapsed < get_live_time_thresh)
+        return;
     do_slow_scan();
-
-    last_time = cur_time;
 }
 
 /* This is the main function.  Read this to understand how the
@@ -2810,16 +2848,16 @@ void update_recursive(PyObject *each_op, cur_heats_table *table)
 }
 
 // returns true if error
-static void visit_func(PyObject *inner_op, heat_node **heat_node_head)
-{
-    heat_node *each_node = (heat_node *)malloc(sizeof(heat_node));
-    Temperature *dummy_temp = malloc(sizeof(Temperature));
-    each_node->temp = dummy_temp;
-    each_node->op = inner_op;
-    DL_APPEND(*heat_node_head, each_node);
-    insert_into_set((uintptr_t)inner_op);
-    return 0;
-}
+// static void visit_func(PyObject *inner_op, heat_node **heat_node_head)
+// {
+//     heat_node *each_node = (heat_node *)malloc(sizeof(heat_node));
+//     Temperature *dummy_temp = malloc(sizeof(Temperature));
+//     each_node->temp = dummy_temp;
+//     each_node->op = inner_op;
+//     DL_APPEND(*heat_node_head, each_node);
+//     insert_into_set((uintptr_t)inner_op);
+//     return 0;
+// }
 
 void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head, bool already_traced)
 {
@@ -4659,11 +4697,6 @@ void *use_pref_cnt_modified(void *arg)
 
 void *use_utlist(void *arg)
 {
-    // insert_into_set(5);
-    // if (check_in_set(5))
-    // {
-    //     fprintf(stderr, "5 found\n");
-    // }
     int cur_scan_idx = 0;
     int cur_slow_idx = 0;
     BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
@@ -4722,6 +4755,11 @@ void *use_utlist(void *arg)
                 Temperature *dummy_temp = malloc(sizeof(Temperature));
                 foundInner = *op_gc_table_iterator_key(op_gc_it);
                 PyObject *container_op = (PyObject *)foundInner;
+                if (check_object_type(container_op) == 1)
+                {
+                    fprintf(stderr, "skipping IO type %ld, type: %s\n", foundInner, container_op->ob_type->tp_name);
+                    continue;
+                }
                 // update cur_size and insert to curHeats
                 // dummy_temp.cur_sizeof = _PySys_GetSizeOf(container_op);
                 // cur_heats_table_insert(curHeats, &foundInner, &dummy_temp);
@@ -4756,7 +4794,6 @@ void *use_utlist(void *arg)
             outter_key_wrapper.ts = ts;
             // uintptr_t curHeats_casted = (uintptr_t)curHeats;
             uintptr_t utlist_casted = (uintptr_t)heat_node_head;
-            fprintf(stderr, "utlist pointer: %p\n", heat_node_head);
             all_heats_table_insert(allHeats, &outter_key_wrapper, &utlist_casted);
         }
         else
@@ -4840,7 +4877,7 @@ void *use_utlist(void *arg)
                     }
                 }
                 DL_COUNT(heat_node_head, node_ptr, utlist_count);
-                fprintf(stderr, "fast %d, # all: %d, # changed: %ld\n", cur_scan_idx, utlist_count, op_gc_table_size(changed_op));
+                fprintf(stderr, "fast %d, # all: %d\n", cur_scan_idx, utlist_count);
             }
         }
         gettimeofday(&update_prev_refcnt_end, NULL);
@@ -4960,63 +4997,158 @@ finialize_bk:
 //     }
 // }
 
-static void mergeIntervals(PyObj_range *intervals, int *size)
+static void mergeIntervals(PyObj_range **intervalsPtr, int *size)
 {
+    PyObj_range *intervals = *intervalsPtr;
     if (*size <= 1)
         return;
-
     qsort(intervals, *size, sizeof(PyObj_range), compareIntervals); // sort by start addr
-
     int mergedIndex = 0;
-    for (int i = 1; i < *size; i++)
+    for (int i = 0; i < *size; i++)
     {
+        intervals[i].start = (intervals[i].start / PAGE_SIZE) * PAGE_SIZE;
+        intervals[i].end = ((intervals[i].end + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
         if (intervals[mergedIndex].end >= intervals[i].start)
         {
             intervals[mergedIndex].end = intervals[mergedIndex].end > intervals[i].end ? intervals[mergedIndex].end : intervals[i].end;
         }
         else
         {
-            mergedIndex++;
             intervals[mergedIndex] = intervals[i];
+            mergedIndex++;
         }
     }
-
     *size = mergedIndex + 1;
+    PyObj_range *newIntervals = realloc(intervals, (*size) * sizeof(PyObj_range));
+    if (newIntervals == NULL)
+    {
+        fprintf(stderr, "realloc failed\n");
+        free(intervals);
+        *intervalsPtr = NULL; // Set the original pointer to NULL to avoid dangling pointer
+    }
+    else
+    {
+        *intervalsPtr = newIntervals;
+    }
+    // uncomment to see if correctly aligned
+    // for (int i = 0; i < *size; i++)
+    // {
+    //     if (intervals[i].start % PAGE_SIZE != 0)
+    //     {
+    //         fprintf(stderr, "start %ld\n", intervals[i].start);
+    //     }
+    //     if (intervals[i].end % PAGE_SIZE != 0)
+    //     {
+    //         fprintf(stderr, "end %ld\n", intervals[i].end);
+    //     }
+    // }
+}
+
+int isBoundaryPresent(uintptr_t boundary, void **boundaries, int size)
+{
+    for (int i = 0; i < size; ++i)
+    {
+        if ((uintptr_t)boundaries[i] == boundary)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundarySize)
+{
+    void **boundaries = malloc(intervalSize * 2 * sizeof(void *)); // Allocate maximum possible size
+    *boundarySize = 0;
+
+    for (int i = 0; i < intervalSize; i++)
+    {
+        for (uintptr_t j = intervals[i].start; j < intervals[i].end; j += PAGE_SIZE)
+        {
+            // if (j % PAGE_SIZE != 0)
+            // {
+            //     fprintf(stderr, "j not aligned %ld\n", j);
+            // }
+            // if (!isBoundaryPresent(j, boundaries, *boundarySize))
+            if (!check_pages2move(j))
+            {
+                // fprintf(stderr, "inserting %ld\n", j);
+                boundaries[*boundarySize] = (void *)j;
+                (*boundarySize)++;
+                insert_pages2move(j);
+            }
+        }
+    }
+    free_pages2move();
+    void **ret = realloc(boundaries, *boundarySize * sizeof(void *));
+    return ret;
 }
 
 static void calculate_merge(int num_objs)
-{ // merge the hot objs and return an array of pages to migrate
+{
+    if (PyGILState_Check())
+    {
+        fprintf(stderr, "GIL held by slow, try merging later\n");
+        usleep(250000); // 0.25s
+        return;
+    }
     heat_node *node_ptr;
     PyObj_range *pyobj_ranges = malloc(num_objs * sizeof(PyObj_range));
     int i = 0;
     // TODO: sanity check, make sure cur_sizeof is positive
     DL_FOREACH(global_heat_utlist, node_ptr)
     {
-        uintptr_t addr_start = (uintptr_t)node_ptr->op;
-        uintptr_t addr_end = (uintptr_t)node_ptr->temp->cur_sizeof + addr_start;
+        uintptr_t addr_start = (uintptr_t)(node_ptr->op);
+        uintptr_t addr_end = (uintptr_t)(node_ptr->temp->cur_sizeof) + addr_start;
         pyobj_ranges[i].start = addr_start;
         pyobj_ranges[i].end = addr_end;
         i += 1;
     }
+    int range_size = num_objs;
+    // fprintf(stderr, "Before merge size: %d\n", range_size);
 
-    int size = sizeof(pyobj_ranges) / sizeof(pyobj_ranges[0]);
-    assert(size == num_objs);
+    mergeIntervals(&pyobj_ranges, &range_size); // this contains bug
+    // fprintf(stderr, "After merge/align page size: %d\n", range_size);
+    // fprintf(stderr, "intervals outside: %p\n", pyobj_ranges);
 
-    mergeIntervals(pyobj_ranges, &size);
-
-    // populate num_pages
-    // int num_pages = 0;
-    // void **pageBoundaries = (void **)malloc(num_pages * sizeof(void *));
-    // int *nodes = malloc(num_pages * sizeof(int));
-    // int *status = malloc(num_pages * sizeof(int));
-    // for (int i = 0; i < num_pages; i++)
+    // for (int i = 0; i < range_size; i++)
     // {
-    //     nodes[i] = 1;
+    //     fprintf(stderr, "(%ld, %ld)\n", pyobj_ranges[i].start, pyobj_ranges[i].end);
     // }
+
+    int num_pages = 0;
+    void **pages = getPageBoundaries(pyobj_ranges, range_size, &num_pages);
+    fprintf(stderr, "num_pages: %d\n", num_pages);
+    for (int i = 0; i < num_pages; i++)
+    {
+        if ((uintptr_t)(pages[i]) % PAGE_SIZE != 0)
+        {
+            fprintf(stderr, "not aligned %ld\n", pages[i]);
+        }
+    }
+
+    int *nodes = malloc(num_pages * sizeof(int));
+    int *status = malloc(num_pages * sizeof(int));
+    for (int i = 0; i < num_pages; i++)
+    {
+        nodes[i] = 1;
+    }
+    long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
+    for (int i = 0; i < num_pages; ++i)
+    {
+        if (status[i] < 0)
+        {
+            fprintf(stderr, "Page %lu not moved: %d\n", i, status[i]);
+        }
+    }
+    free(pyobj_ranges);
+    free(pages);
+    free(nodes);
+    free(status);
 }
 
 void *manual_trigger_scan(void *arg)
 {
+    enable_bk = true;
     BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
     if (!bookkeep_args->live_time_thresh_arg)
     {
@@ -5026,7 +5158,7 @@ void *manual_trigger_scan(void *arg)
     {
         get_live_time_thresh = bookkeep_args->live_time_thresh_arg;
     }
-    do_slow_scan(); // enforce a slow scan
+    do_slow_scan(); // enforce one-time slow scan
     int rescan_thresh = bookkeep_args->rescan_thresh;
     // unsigned int doIO_ = bookkeep_args->doIO;
     // PyGILState_STATE gstate;
@@ -5167,6 +5299,7 @@ void *manual_trigger_scan(void *arg)
             //     fprintf(stderr, "GIL held by slow, try get sizeof later\n");
             //     usleep(250000); // 0.25s
             // }
+            clock_t counting_size_start = clock();
             PyGILState_STATE gstate = PyGILState_Ensure();
             DL_FOREACH(global_heat_utlist, node_ptr)
             {
@@ -5175,7 +5308,15 @@ void *manual_trigger_scan(void *arg)
                 temp_ptr->cur_sizeof = _PySys_GetSizeOf(op);
             }
             PyGILState_Release(gstate);
-            // calculate_merge(utlist_count);
+            clock_t counting_size_end = clock();
+            double counting_size_time = ((double)(counting_size_end - counting_size_start)) / CLOCKS_PER_SEC;
+            fprintf(stderr, "counting_size_time: %.3f\n", counting_size_time);
+
+            clock_t merge_start = clock();
+            calculate_merge(utlist_count);
+            clock_t merge_end = clock();
+            double merge_time = ((double)(merge_end - merge_start)) / CLOCKS_PER_SEC;
+            fprintf(stderr, "merge + migration time: %.3f\n", merge_time);
         }
         // rendezvous_state = 1;
         // pthread_cond_signal(&cond); // signal slow_scan, if pending
@@ -5184,4 +5325,5 @@ void *manual_trigger_scan(void *arg)
         // }
     }
     terminate_flag_refchain = 0;
+    enable_bk = false;
 }
