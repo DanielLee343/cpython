@@ -18,3 +18,8 @@ extern "C" void free_set()
 {
     mySet.clear();
 }
+
+extern "C" int get_set_size()
+{
+    return mySet.size();
+}

@@ -459,6 +459,7 @@ check by comparing the reference count field to the immortality reference count.
         int rescan_thresh;
         PyThreadState *mainThreadState;
         unsigned long live_time_thresh_arg;
+        unsigned int max_allowed_ctn;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
@@ -477,6 +478,7 @@ check by comparing the reference count field to the immortality reference count.
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
     PyAPI_FUNC(void *) use_utlist(void *arg);
     PyAPI_FUNC(void *) manual_trigger_scan(void *arg);
+    PyAPI_FUNC(void *) inspect_survived_objs(void *arg);
 
     /*
     Type flags (tp_flags)

@@ -31,6 +31,7 @@ extern "C" {
 
 /* --- pymain_init() ---------------------------------------------- */
 
+
 static PyStatus
 pymain_init(const _PyArgv *args)
 {

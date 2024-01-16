@@ -19,6 +19,8 @@
 #include "pycore_unionobject.h"   // _PyUnion_Type
 #include "interpreteridobject.h"  // _PyInterpreterID_Type
 
+khash_t(ptrset) * global_op_set;
+
 volatile short terminate_flag_refchain = 0;
 #ifdef Py_LIMITED_API
 // Prevent recursive call _Py_IncRef() <=> Py_INCREF()
@@ -29,6 +31,25 @@ volatile short terminate_flag_refchain = 0;
 extern "C"
 {
 #endif
+
+    static inline void
+    init_global_op_set()
+    {
+        fprintf(stderr, "initing global_op_set\n");
+        global_op_set = kh_init(ptrset);
+    }
+    static inline void
+    delete_from_global_op_set(PyObject *op)
+    {
+        khint_t k;
+        k = kh_get(ptrset, global_op_set, (uintptr_t)op); // Get the position of the key in the set
+
+        if (k != kh_end(global_op_set))
+        {
+            // fprintf(stderr, "deleted\n");
+            kh_del(ptrset, global_op_set, k); // Delete the key from the set
+        }
+    }
 
     /* Defined in tracemalloc.c */
     extern void _PyMem_DumpTraceback(int fd, const void *ptr);
@@ -2193,6 +2214,7 @@ extern "C"
             init_refchain(interp);
         }
 #endif
+        init_global_op_set();
     }
 
     extern PyTypeObject _Py_GenericAliasIterType;
@@ -2380,6 +2402,8 @@ extern "C"
 #ifdef Py_TRACE_REFS
         _Py_AddToAllObjects(op, 1);
 #endif
+        // int ret;
+        // kh_put(ptrset, global_op_set, (uintptr_t)op, &ret);
     }
 
     void
@@ -2835,6 +2859,7 @@ extern "C"
         _Py_ForgetReference(op);
 #endif
         (*dealloc)(op);
+        delete_from_global_op_set(op);
 
 #ifdef Py_DEBUG
         // gh-89373: The tp_dealloc function must leave the current exception

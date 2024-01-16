@@ -11,6 +11,7 @@ extern "C"
     void insert_into_set(uintptr_t value);
     int check_in_set(uintptr_t value);
     void free_set();
+    int get_set_size();
 
 #ifdef __cplusplus
 }
