@@ -57,12 +57,16 @@ pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 khash_t(ptrset) * h;                          // for use_utlist
 khash_t(ptrset) * live_container_op_set;      // contains all live container objs (including newly survived)
 khash_t(ptrset) * collected_container_op_set; // contains collected (dead) objects
-khash_t(ptrset) * cur_survived_op_set;        // contains current survived objects
+// khash_t(ptrset) * cur_survived_op_set;        // contains current survived objects
 extern khash_t(ptrset) * global_op_set;
+#include "klist.h"
+#define __int_free(x)
+KLIST_INIT(ptrlist, PyObject *, __int_free)
 
 KHASH_MAP_INIT_INT64(ptr2int, int)
 khash_t(ptr2int) * op_depth_map;
 BookkeepArgs *global_bookkeep_args;
+uintptr_t glb_lowest_op = UINTPTR_MAX;
 
 static clock_t last_time;
 static bool enable_bk;
@@ -77,11 +81,19 @@ typedef struct heat_node
     struct heat_node *next, *prev;
 } heat_node;
 
+typedef struct cur_survived_node
+{
+    // uintptr_t op;
+    PyObject *op;
+    struct cur_survived_node *next, *prev;
+} cur_survived_node;
+
 pthread_mutex_t mutex;
 pthread_cond_t cond_slow, cond_fast; // condA for slow, condB for fast
 int allow_fast = 0;
 int allow_slow = 0;
 PyGC_Head *global_old;
+PyGC_Head *global_old_last;
 static int gen_idx = -1;
 
 int cmp_func(heat_node *a, heat_node *b)
@@ -109,9 +121,9 @@ typedef struct _gc_runtime_state GCState;
 void update_recursive_utlist(PyObject *each_op, heat_node **heat_node_head);
 void update_recursive(PyObject *each_op, cur_heats_table *table);
 void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table *table);
-void update_recursive_visitor(PyObject *each_op, int *depth);
-void inner_traversing(PyObject *each_op, int *depth);
-bool found_in_kset(uintptr_t op);
+void update_recursive_visitor(PyObject *each_op, unsigned int *depth);
+void inner_traversing(PyObject *each_op, unsigned int *depth);
+bool found_in_kset(PyObject *op);
 void append_to_heat_node_cannot_partial_free(heat_node **starting_node); // malloc a heat_node pool from kh set, but cannot partially free
 void append_to_heat_node_flexibel_free(heat_node **starting_node);       // malloc each heat_node separately, can partially free
 static void add_to_survived_from_young(PyGC_Head *survived);
@@ -693,7 +705,7 @@ visit_reachable_add_to_live_container_op(PyObject *op, PyGC_Head *reachable)
     else if (gc_refs == 0)
     {
         gc_set_refs(gc, 1);
-        kh_put(ptrset, live_container_op_set, (uintptr_t)op, &ret);
+        kh_put(ptrset, live_container_op_set, op, &ret);
     }
     else
     {
@@ -1301,7 +1313,7 @@ delete_garbage_with_adding_collected_op(PyThreadState *tstate, GCState *gcstate,
         }
         else
         {
-            kh_put(ptrset, collected_container_op_set, (uintptr_t)op, &ret);
+            kh_put(ptrset, collected_container_op_set, op, &ret);
         }
     }
 }
@@ -1689,138 +1701,121 @@ static void try_trigger_slow_scan()
 
 void remove_dead_container_op()
 {
-    if (!collected_container_op_set || !live_container_op_set || !cur_survived_op_set)
+    if (!collected_container_op_set || !live_container_op_set)
         return;
     khint_t k;
     for (k = kh_begin(collected_container_op_set); k != kh_end(collected_container_op_set); ++k)
     {
         if (kh_exist(collected_container_op_set, k))
         {
-            uintptr_t key = kh_key(collected_container_op_set, k);
+            PyObject *key = kh_key(collected_container_op_set, k);
             if (kh_get(ptrset, live_container_op_set, key) != kh_end(live_container_op_set))
             {
                 kh_del(ptrset, live_container_op_set, k);
             }
-            if (kh_get(ptrset, cur_survived_op_set, key) != kh_end(cur_survived_op_set))
-            {
-                kh_del(ptrset, cur_survived_op_set, k);
-            }
+            // if (kh_get(ptrset, cur_survived_op_set, key) != kh_end(cur_survived_op_set))
+            // {
+            //     kh_del(ptrset, cur_survived_op_set, k);
+            // }
         }
     }
 }
 
-static void try_append_survived_set(PyObject *op, khash_t(ptrset) * survived_op_set)
+// static void try_append_survived_set(PyObject *op, khash_t(ptrset) * survived_op_set)
+static void try_append_survived_set(PyObject *op, klist_t(ptrlist) * survived_op_list)
 {
-    khint_t k = kh_get(ptrset, live_container_op_set, (uintptr_t)op);
-    if (k != kh_end(live_container_op_set))
-    { // exits
-        return;
-    }
-    else
+    khint_t k = kh_get(ptrset, live_container_op_set, op);
+    if (k == kh_end(live_container_op_set))
     {
-        int ret;
-        kh_put(ptrset, survived_op_set, (uintptr_t)op, &ret);
-        // (*cur_gen_size_ptr)++;
+        // return;
+        *kl_pushp(ptrlist, survived_op_list) = op;
+        // int ret;
+        // kh_put(ptrset, survived_op_set, (uintptr_t)op, &ret);
     }
 }
 
-static double try_cascading_old(khash_t(ptrset) * survived_op_set, int slow_idx)
+static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptrset) * survived_op_set, int slow_idx)
 {
     // fprintf(stderr, "survived_op_set: %ld\n", (uintptr_t)survived_op_set);
-    PyGILState_STATE gstate = PyGILState_Ensure();
+    // PyGILState_STATE gstate = PyGILState_Ensure();
     if (!enable_bk || !global_old || gen_idx == -1)
         return;
     PyGC_Head *gc;
     PyObject *container_op;
     int ret;
+    int ret_;
+    khint_t k_dp;
     fprintf(stderr, "inspectin survived objs...\n");
     clock_t start_traverse = clock();
     fprintf(stderr, "global_old: %ld, generation: %d\n", (uintptr_t)global_old, gen_idx);
     unsigned long cur_gen_size = 0;
     unsigned int max_allowed_ctn = global_bookkeep_args->max_allowed_ctn;
-    if (0)
+    op_depth_map = kh_init(ptr2int);
+    // struct timespec ts;
+    // clock_gettime(CLOCK_MONOTONIC, &ts);
+    // append to survived_op_set
     {
+        // unsigned long count = 0;
+        uintptr_t local_lowest_op = UINTPTR_MAX;
         for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
         {
             container_op = FROM_GC(gc);
-            unsigned long cur_len = Py_SIZE(container_op);
-            if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op) || cur_len > 10000000)
-                continue;
-            // try_append_survived_set(container_op, survived_op_set);
-            // kh_put(ptrset, live_container_op_set, (uintptr_t)container_op, &ret);
-            kh_put(ptrset, survived_op_set, (uintptr_t)container_op, &ret);
-            // if (cur_gen_size++ == max_allowed_ctn)
-            // {
-            //     break;
-            // }
-            fprintf(stderr, "%s\t%lu\n", Py_TYPE(container_op)->tp_name, cur_len);
-        }
-        fflush(stderr);
-    }
-    else
-    {
-        for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
-        {
-            container_op = FROM_GC(gc);
-            if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op)) // || PyDecSignalDict_Check(container_op)
-                continue;
-            // unsigned long cur_len = Py_SIZE(container_op);
-            // if (cur_len > 10000000)
+            // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
+            // if (cur_len > 5)
             //     continue;
-            // if (PyList_Check(container_op) || PyDict_Check(container_op))
-            // {
-            //     try_append_survived_set(container_op, survived_op_set);
-            //     kh_put(ptrset, live_container_op_set, (uintptr_t)container_op, &ret);
-            // }
-
-            kh_put(ptrset, survived_op_set, (uintptr_t)container_op, &ret);
-            // if (cur_gen_size++ == max_allowed_ctn)
-            // {
-            //     break;
-            // }
+            // if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op))
+            //     continue;
+            // try_append_survived_set(container_op, survived_op_list);
+            // kh_put(ptrset, live_container_op_set, container_op, &ret);
+            if ((uintptr_t)container_op < glb_lowest_op)
+            {
+                if ((uintptr_t)container_op < local_lowest_op)
+                {
+                    local_lowest_op = (uintptr_t)container_op;
+                }
+                *kl_pushp(ptrlist, survived_op_list) = container_op;
+            }
+            // count++;
         }
+        glb_lowest_op = local_lowest_op;
     }
+    // fprintf(stderr, "global_old_last: %ld\n", (uintptr_t)global_old_last); // not informative
     // now, delete the collected objs
-    remove_dead_container_op();
+    remove_dead_container_op(); // TODO: double check if necessary
     clock_t finish_container_traverse = clock();
 
     unsigned int live_size = kh_size(live_container_op_set);
     unsigned int collected_size = kh_size(collected_container_op_set);
-    unsigned int survived_size = kh_size(survived_op_set);
-    fprintf(stderr, "cur_gen_size: %lu, live_size: %u, collected_size: %u, survived size: %u\n", cur_gen_size, live_size, collected_size, survived_size);
+    // unsigned int survived_size = kh_size(survived_op_set);
+    fprintf(stderr, "cur_gen_size: %lu, live_size: %u, collected_size: %u\n", cur_gen_size, live_size, collected_size);
 
-    // cascading the cur_survived_op_set, append to global_op_set
-    if (!global_op_set || !survived_op_set)
+    if (!global_op_set)
     {
-        fprintf(stderr, "UNLIKELY!!! global_op_set or cur_survived_op_set not initialized\n");
+        fprintf(stderr, "UNLIKELY!!! global_op_set not initialized\n");
         // return;
     }
-    if (!survived_size)
-    {
-        fprintf(stderr, "No new survived objs\n");
-        //     return;
-    }
+    // if (!survived_size)
+    // {
+    //     fprintf(stderr, "No new survived objs\n");
+    // }
     // PyGILState_STATE gstate = PyGILState_Ensure();
-    op_depth_map = kh_init(ptr2int);
-    khint_t k;
-    khint_t k_dp;
-    int cur_depth = 0;
-    for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k)
-    {
-        if (kh_exist(survived_op_set, k))
-        {
-            uintptr_t container_casted = kh_key(survived_op_set, k);
 
-            kh_put(ptrset, global_op_set, container_casted, &ret);
-            cur_depth = 0;
-            unsigned long cur_len = _PySys_GetSizeOf((PyObject *)container_casted);
-            // unsigned long cur_len = Py_SIZE(container_op);
-            update_recursive_visitor((PyObject *)container_casted, &cur_depth);
-            k_dp = kh_put(ptr2int, op_depth_map, container_casted, &ret);
-            if (ret > 0)
-                kh_value(op_depth_map, k_dp) = cur_len;
-        }
+    khint_t k;
+
+    // for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k) // for kh_set
+    //     if (kh_exist(survived_op_set, k))
+    kliter_t(ptrlist) * klist_iter;
+    for (klist_iter = kl_begin(survived_op_list); klist_iter != kl_end(survived_op_list); klist_iter = kl_next(klist_iter))
+    {
+        PyObject *container = kl_val(klist_iter);
+        // kh_put(ptrset, global_op_set, container, &ret);
+        // unsigned int combined = 0;
+        // update_recursive_visitor(container, &combined);
+        fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
     }
+    fflush(global_bookkeep_args->fd);
+    fprintf(stderr, "flush complete\n");
+
     unsigned int global_op_size = kh_size(global_op_set);
     unsigned long op_depth_map_size = kh_size(op_depth_map);
     fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
@@ -1829,8 +1824,8 @@ static double try_cascading_old(khash_t(ptrset) * survived_op_set, int slow_idx)
     double time_spent_container = (double)(finish_container_traverse - start_traverse) / CLOCKS_PER_SEC;
     double time_spent_cascading = (double)(finish_cascading - finish_container_traverse) / CLOCKS_PER_SEC;
     fprintf(stderr, "time spent tracing container: %.3f, cascading: %.3f\n", time_spent_container, time_spent_cascading);
-    if (slow_idx == 5)
-    // if (0)
+    // if (slow_idx == 6)
+    if (0)
     { // calculate average depth
         unsigned long total_len = 0;
         // for (k = kh_begin(op_depth_map); k != kh_end(op_depth_map); ++k)
@@ -1846,6 +1841,8 @@ static double try_cascading_old(khash_t(ptrset) * survived_op_set, int slow_idx)
         kh_foreach(op_depth_map, each_key, len, {
             // get each key
             // uintptr_t each_op = kh_key(op_depth_map, each_key);
+            if (len > 5048432)
+                continue;
             fprintf(stderr, "%s\t%lu\n", Py_TYPE(each_key)->tp_name, len);
             total_len += len;
         });
@@ -1854,34 +1851,14 @@ static double try_cascading_old(khash_t(ptrset) * survived_op_set, int slow_idx)
         float avg_len = (float)total_len / op_depth_map_size;
         fprintf(stderr, "total_len: %lu, op_depth_map_size: %lu, avg depth: %.3f\n", total_len, op_depth_map_size, avg_len);
     }
-
-    // khint_t k;
-    // survived_op_set
-    // live_container_op_set
-    // global_op_set
-    if (global_bookkeep_args->doIO)
-    {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        fprintf(stderr, "streaming...\n");
-        for (k = kh_begin(global_op_set); k != kh_end(global_op_set); ++k)
-        {
-            if (kh_exist(global_op_set, k))
-            {
-                uintptr_t container_casted = kh_key(global_op_set, k);
-                fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld\n", ts.tv_sec, ts.tv_nsec, container_casted);
-            }
-        }
-        fprintf(stderr, "stream complete\n");
-    }
-    PyGILState_Release(gstate);
+    // PyGILState_Release(gstate);
     kh_destroy(ptr2int, op_depth_map);
     return time_spent_container;
 }
 
 static void add_to_survived_from_young(PyGC_Head *survived)
 {
-    if (!enable_bk || !cur_survived_op_set)
+    if (!enable_bk) // || !cur_survived_op_set
         return;
     PyGC_Head *gc;
     int ret;
@@ -1889,7 +1866,7 @@ static void add_to_survived_from_young(PyGC_Head *survived)
     {
         PyObject *op = FROM_GC(gc);
         // try_append_survived_set(op);
-        kh_put(ptrset, cur_survived_op_set, (uintptr_t)op, &ret); // append regardless
+        // kh_put(ptrset, cur_survived_op_set, (uintptr_t)op, &ret); // append regardless
     }
 }
 
@@ -1964,7 +1941,7 @@ gc_collect_main(PyThreadState *tstate, int generation,
     else
     { // if the oldest gen
         /* We only un-track dicts in full collections, to avoid quadratic
-           dict build-up. See issue #14775. */
+        dict build-up. See issue #14775. */
         untrack_dicts(young);
         gcstate->long_lived_pending = 0;
         gcstate->long_lived_total = gc_list_size(young);
@@ -2050,6 +2027,7 @@ gc_collect_main(PyThreadState *tstate, int generation,
     handle_legacy_finalizers(tstate, gcstate, &finalizers, old);
     validate_list(old, collecting_clear_unreachable_clear);
     global_old = old;
+    global_old_last = GC_PREV(old);
     gen_idx = generation;
 
     /* Clear free list only during the collection of the highest
@@ -2186,40 +2164,40 @@ gc_collect_generations(PyThreadState *tstate)
         if (gcstate->generations[i].count > gcstate->generations[i].threshold)
         {
             /* Avoid quadratic performance degradation in number
-               of tracked objects (see also issue #4074):
+            of tracked objects (see also issue #4074):
 
-               To limit the cost of garbage collection, there are two strategies;
-                 - make each collection faster, e.g. by scanning fewer objects
-                 - do less collections
-               This heuristic is about the latter strategy.
+            To limit the cost of garbage collection, there are two strategies;
+                - make each collection faster, e.g. by scanning fewer objects
+                - do less collections
+            This heuristic is about the latter strategy.
 
-               In addition to the various configurable thresholds, we only trigger a
-               full collection if the ratio
+            In addition to the various configurable thresholds, we only trigger a
+            full collection if the ratio
 
                 long_lived_pending / long_lived_total
 
-               is above a given value (hardwired to 25%).
+            is above a given value (hardwired to 25%).
 
-               The reason is that, while "non-full" collections (i.e., collections of
-               the young and middle generations) will always examine roughly the same
-               number of objects -- determined by the aforementioned thresholds --,
-               the cost of a full collection is proportional to the total number of
-               long-lived objects, which is virtually unbounded.
+            The reason is that, while "non-full" collections (i.e., collections of
+            the young and middle generations) will always examine roughly the same
+            number of objects -- determined by the aforementioned thresholds --,
+            the cost of a full collection is proportional to the total number of
+            long-lived objects, which is virtually unbounded.
 
-               Indeed, it has been remarked that doing a full collection every
-               <constant number> of object creations entails a dramatic performance
-               degradation in workloads which consist in creating and storing lots of
-               long-lived objects (e.g. building a large list of GC-tracked objects would
-               show quadratic performance, instead of linear as expected: see issue #4074).
+            Indeed, it has been remarked that doing a full collection every
+            <constant number> of object creations entails a dramatic performance
+            degradation in workloads which consist in creating and storing lots of
+            long-lived objects (e.g. building a large list of GC-tracked objects would
+            show quadratic performance, instead of linear as expected: see issue #4074).
 
-               Using the above ratio, instead, yields amortized linear performance in
-               the total number of objects (the effect of which can be summarized
-               thusly: "each full garbage collection is more and more costly as the
-               number of objects grows, but we do fewer and fewer of them").
+            Using the above ratio, instead, yields amortized linear performance in
+            the total number of objects (the effect of which can be summarized
+            thusly: "each full garbage collection is more and more costly as the
+            number of objects grows, but we do fewer and fewer of them").
 
-               This heuristic was suggested by Martin von Löwis on python-dev in
-               June 2008. His original analysis and proposal can be found at:
-               http://mail.python.org/pipermail/python-dev/2008-June/080579.html
+            This heuristic was suggested by Martin von Löwis on python-dev in
+            June 2008. His original analysis and proposal can be found at:
+            http://mail.python.org/pipermail/python-dev/2008-June/080579.html
             */
             if (i == NUM_GENERATIONS - 1 && gcstate->long_lived_pending < gcstate->long_lived_total / 4)
                 continue;
@@ -2321,12 +2299,12 @@ gc.set_debug
 
     flags: int
         An integer that can have the following bits turned on:
-          DEBUG_STATS - Print statistics during collection.
-          DEBUG_COLLECTABLE - Print collectable objects found.
-          DEBUG_UNCOLLECTABLE - Print unreachable but uncollectable objects
+        DEBUG_STATS - Print statistics during collection.
+        DEBUG_COLLECTABLE - Print collectable objects found.
+        DEBUG_UNCOLLECTABLE - Print unreachable but uncollectable objects
             found.
-          DEBUG_SAVEALL - Save objects to gc.garbage rather than freeing them.
-          DEBUG_LEAK - Debug leaking programs (everything but STATS).
+        DEBUG_SAVEALL - Save objects to gc.garbage rather than freeing them.
+        DEBUG_LEAK - Debug leaking programs (everything but STATS).
     /
 
 Set the garbage collection debugging flags.
@@ -2447,7 +2425,7 @@ gc_referrers_for(PyObject *objs, PyGC_Head *list, PyObject *resultlist)
 
 PyDoc_STRVAR(gc_get_referrers__doc__,
              "get_referrers(*objs) -> list\n\
-Return the list of objects that directly refer to any of objs.");
+    Return the list of objects that directly refer to any of objs.");
 
 static PyObject *
 gc_get_referrers(PyObject *self, PyObject *args)
@@ -2483,78 +2461,52 @@ referentsvisit(PyObject *obj, PyObject *list)
     // fprintf(stderr, "\t from inner\n");
     return PyList_Append(list, obj) < 0;
 }
-
-// static int cascadingvisitor(PyObject *inner_op, heat_node **heat_node_head)
-static int cascadingvisitor(PyObject *inner_op, int *depth)
+// static int cascadingvisitor(PyObject *inner_op, int *depth)
+static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 {
-    // PyObject_Print(inner_op, stderr, 1);
-    // fprintf(stderr, "\t examined\n");
-    // if (!inner_op)
-    // {
-    //     return;
-    // }
-    // if (check_in_set((uintptr_t)inner_op))
-    // if (found_in_kset((uintptr_t)inner_op))
-    // {
-    //     goto examine_cascading;
-    // }
-    // Temperature *dummy_temp = malloc(sizeof(Temperature));
-    // heat_node *each_node = malloc(sizeof(heat_node));
-    // each_node->temp = dummy_temp;
-    // each_node->op = inner_op;
-    // DL_APPEND(*heat_node_head, each_node);
-    // insert_into_set((uintptr_t)inner_op); // no need for this
-    // kh_put(ptrset, h, (uintptr_t)inner_op, &ret);
-    // int ret;
-    // kh_put(ptrset, global_op_set, (uintptr_t)inner_op, &ret);
-
-    if (found_in_kset((uintptr_t)inner_op))
+    if (found_in_kset(inner_op))
     {
-        // fprintf(stderr, "exists, skip...");
-        // PyObject_Print(inner_op, stderr, 1);
-        // fprintf(stderr, "\n");
         return 0;
-        // goto examine_cascading;
     }
+    // *combined = (*combined & 0xFFFF0000) | (*combined & 0xFFFF) + 1;
+    *combined += 1;
+    // fprintf(stderr, "length: %u\n", *combined & 0xFFFF);
 
     int ret;
-    kh_put(ptrset, global_op_set, (uintptr_t)inner_op, &ret);
-
-    unsigned long cur_size = _PySys_GetSizeOf(inner_op);
-    khint_t k_dp = kh_put(ptr2int, op_depth_map, (uintptr_t)inner_op, &ret); // add to op_depth map
-    if (ret > 0)
-        kh_value(op_depth_map, k_dp) = cur_size;
-
-    // fprintf(stderr, "inserting inner...");
-    // PyObject_Print(inner_op, stderr, 1);
-    // fprintf(stderr, "\n");
-    // (*depth)++; // place here for calc length
-    // inner_traversing(inner_op, depth);
-    update_recursive_visitor(inner_op, depth);
+    kh_put(ptrset, global_op_set, inner_op, &ret);
+    // inner_traversing(inner_op, combined); // for testing gc.get_referents()
+    update_recursive_visitor(inner_op, combined); // for real
     return 0;
 }
-void inner_traversing(PyObject *each_op, int *depth)
+void inner_traversing(PyObject *each_op, unsigned int *combined)
 {
-    if (!each_op)
+    if (!each_op || !_PyObject_IS_GC(each_op))
     {
         return;
     }
-    if (!_PyObject_IS_GC(each_op))
-        return;
-    traverseproc traverse;
-    traverse = Py_TYPE(each_op)->tp_traverse;
+    traverseproc traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
 
-    (*depth)++; // if placed here, it's the depth
-    // int len = 0;
-    traverse(each_op, (visitproc)cascadingvisitor, depth);
-    // fprintf(stderr, "cur_length: %d\n", depth);
+    // unsigned int new_len = 0;
+    // new_len |= (*combined << 16);
+
+    unsigned int last_length = *combined & 0xFFFF;
+    *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
+    // fprintf(stderr, "last length preserved: %u\n", last_length);
+
+    *combined += (1 << 16); // increase depths
+    unsigned int extractedDepth = (*combined >> 16);
+    fprintf(stderr, "depth: %u\n", extractedDepth);
+
+    traverse(each_op, (visitproc)cascadingvisitor, combined);
+    *combined = (*combined & 0xFFFF0000) | last_length;
+    // set length to last_length
 }
 
 PyDoc_STRVAR(gc_get_referents__doc__,
              "get_referents(*objs) -> list\n\
-Return the list of objects that are directly referred to by objs.");
+    Return the list of objects that are directly referred to by objs.");
 
 // static PyObject *
 // gc_get_referents(PyObject *self, PyObject *args)
@@ -2603,9 +2555,6 @@ gc_get_referents(PyObject *self, PyObject *args)
         return NULL;
 
     int ret;
-    // khint_t k_dp;
-    unsigned int global_op_size = kh_size(global_op_set);
-    fprintf(stderr, "init global live op size: %u\n", global_op_size);
     for (i = 0; i < PyTuple_GET_SIZE(args); i++)
     {
         PyObject *obj = PyTuple_GET_ITEM(args, i);
@@ -2621,18 +2570,19 @@ gc_get_referents(PyObject *self, PyObject *args)
         // each_node->op = obj;
         // DL_APPEND(heat_node_head, each_node);
         // insert_into_set((uintptr_t)obj);
-        fprintf(stderr, "inserting outter...");
-        PyObject_Print(obj, stderr, 1);
-        fprintf(stderr, "\n");
-        kh_put(ptrset, global_op_set, (uintptr_t)obj, &ret);
-        int cur_depth = 0;
-        inner_traversing(obj, &cur_depth);
-        fprintf(stderr, "cur_depth: %d\n", cur_depth);
+        // fprintf(stderr, "inserting outter...");
+        // PyObject_Print(obj, stderr, 1);
+        // fprintf(stderr, "\n");
+        // kh_put(ptrset, global_op_set, (uintptr_t)obj, &ret);
+        unsigned int combined = 0;
+        inner_traversing(obj, &combined);
+        // unsigned int new_depth = (*combined >> 16) & 0xffff;
+        // fprintf(stderr, "cur_depth: %d\n", cur_depth);
         // k_dp = kh_put(ptr2int, op_depth_map, container_casted, &ret);
         // if (ret > 0)
         //     kh_value(op_depth_map, k_dp) = cur_depth;
     }
-    global_op_size = kh_size(global_op_set);
+    unsigned int global_op_size = kh_size(global_op_set);
     fprintf(stderr, "global live op size: %u\n", global_op_size);
     return result;
     // return NULL;
@@ -2725,7 +2675,7 @@ gc_get_stats_impl(PyObject *module)
     struct gc_generation_stats stats[NUM_GENERATIONS], *st;
 
     /* To get consistent values despite allocations while constructing
-       the result list, we use a snapshot of the running stats. */
+    the result list, we use a snapshot of the running stats. */
     GCState *gcstate = get_gc_state();
     for (i = 0; i < NUM_GENERATIONS; i++)
     {
@@ -3010,11 +2960,11 @@ Py_ssize_t
 _PyGC_CollectNoFail(PyThreadState *tstate)
 {
     /* Ideally, this function is only called on interpreter shutdown,
-       and therefore not recursively.  Unfortunately, when there are daemon
-       threads, a daemon thread can start a cyclic garbage collection
-       during interpreter shutdown (and then never finish it).
-       See http://bugs.python.org/issue8713#msg195178 for an example.
-       */
+    and therefore not recursively.  Unfortunately, when there are daemon
+    threads, a daemon thread can start a cyclic garbage collection
+    during interpreter shutdown (and then never finish it).
+    See http://bugs.python.org/issue8713#msg195178 for an example.
+    */
     GCState *gcstate = &tstate->interp->gc;
     if (gcstate->collecting)
     {
@@ -3041,8 +2991,8 @@ void _PyGC_DumpShutdownStats(PyInterpreterState *interp)
             message = "gc: %zd uncollectable objects at "
                       "shutdown; use gc.set_debug(gc.DEBUG_UNCOLLECTABLE) to list them";
         /* PyErr_WarnFormat does too many things and we are at shutdown,
-           the warnings module's dependencies (e.g. linecache) may be gone
-           already. */
+        the warnings module's dependencies (e.g. linecache) may be gone
+        already. */
         if (PyErr_WarnExplicitFormat(PyExc_ResourceWarning, "gc", 0,
                                      "gc", NULL, message,
                                      PyList_GET_SIZE(gcstate->garbage)))
@@ -3072,8 +3022,8 @@ void _PyGC_Fini(PyInterpreterState *interp)
     Py_CLEAR(gcstate->callbacks);
 
     /* We expect that none of this interpreters objects are shared
-       with other interpreters.
-       See https://github.com/python/cpython/issues/90228. */
+    with other interpreters.
+    See https://github.com/python/cpython/issues/90228. */
 }
 
 /* for debugging */
@@ -3097,7 +3047,7 @@ visit_validate(PyObject *op, void *parent_raw)
 #endif
 
 /* extension modules might be compiled with GC support so these
-   functions must always be available */
+functions must always be available */
 
 void PyObject_GC_Track(void *op_raw)
 {
@@ -3112,7 +3062,7 @@ void PyObject_GC_Track(void *op_raw)
 
 #ifdef Py_DEBUG
     /* Check that the object is valid: validate objects traversed
-       by tp_traverse() */
+    by tp_traverse() */
     traverseproc traverse = Py_TYPE(op)->tp_traverse;
     (void)traverse(op, visit_validate, op);
 #endif
@@ -3537,7 +3487,7 @@ static bool ismapped(const void *ptr, int bytes)
 }
 
 // void update_recursive_visitor(PyObject *each_op, heat_node **heat_node_head)
-void update_recursive_visitor(PyObject *each_op, int *depth)
+void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
 {
     if (!each_op)
     {
@@ -3582,9 +3532,13 @@ void update_recursive_visitor(PyObject *each_op, int *depth)
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
-    // (*depth)++;
-    int length = 0;
-    traverse(each_op, (visitproc)cascadingvisitor, &length);
+
+    unsigned int last_length = *combined & 0xFFFF;
+    *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
+    *combined += (1 << 16);  // increase depths
+    unsigned int extractedDepth = (*combined >> 16);
+    traverse(each_op, (visitproc)cascadingvisitor, combined);
+    *combined = (*combined & 0xFFFF0000) | last_length;
     // calculate length
     // if (length > 0)
     // {
@@ -5354,7 +5308,7 @@ void append_to_heat_node_flexibel_free(heat_node **starting_node)
     fprintf(stderr, "appended %d nodes\n", i);
 }
 
-bool found_in_kset(uintptr_t op)
+bool found_in_kset(PyObject *op)
 {
     khint_t k = kh_get(ptrset, global_op_set, op);
     if (k == kh_end(global_op_set))
@@ -5456,7 +5410,7 @@ void *use_utlist(void *arg)
                 // }
                 // fprintf(stderr, "\n");
                 // update_recursive_utlist(container_op, &heat_node_head);
-                int cur_depth = 0;
+                unsigned int cur_depth = 0;
                 update_recursive_visitor(container_op, &cur_depth);
                 k = kh_put(ptr2int, op_depth_map, foundInner, &ret); // add to op_depth map
                 if (ret > 0)
@@ -6058,39 +6012,36 @@ void *inspect_survived_objs(void *arg)
 
     // BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
     global_bookkeep_args = (BookkeepArgs *)arg;
-// if (!bookkeep_args->live_time_thresh_arg)
-// {
-//     get_live_time_thresh = 2500000; // default: 2.5s
-// }
-// else
-// {
-//     get_live_time_thresh = bookkeep_args->live_time_thresh_arg;
-// }
-// allow_slow = 1;
-// do_slow_scan(); // enforce one-time slow scan
-// int rescan_thresh = bookkeep_args->rescan_thresh;
-// unsigned int doIO_ = bookkeep_args->doIO;
-// // PyGILState_STATE gstate;
-// // int rescan_thresh = bookkeep_args->rescan_thresh;
-// // then do fast scans
-// // TODO: need to maintain a lock/signal to inform when to start/stop slow scan, during fast cycles
-// int total_fast_num = 0;
-// Temperature *temp_ptr;
-// heat_node *node_ptr, *tmp;
-// int fast_scan_idx = 0;
-// int utlist_count;
-// uintptr_t foundInner;
-// uintptr_t prev_changed_max = 0;
-// uintptr_t prev_changed_min = ULONG_MAX;
-// uintptr_t no_93_upper = 100000000000000;
-// int trigger_drop_thresh = 50; // percentage
-// bool do_drop_unhot_op;
-// clock_t cur_fast_start, cur_fast_end;
-// all_heats_table *allHeats = all_heats_table_init(0);
-// all_heats_table_locked_table *allHeats_locked = NULL;
-#ifdef Py_TRACE_REFS
-    fprintf(stderr, "Py_TRACE_REFS is defined\n");
-#endif
+    // if (!bookkeep_args->live_time_thresh_arg)
+    // {
+    //     get_live_time_thresh = 2500000; // default: 2.5s
+    // }
+    // else
+    // {
+    //     get_live_time_thresh = bookkeep_args->live_time_thresh_arg;
+    // }
+    // allow_slow = 1;
+    // do_slow_scan(); // enforce one-time slow scan
+    // int rescan_thresh = bookkeep_args->rescan_thresh;
+    // unsigned int doIO_ = bookkeep_args->doIO;
+    // // PyGILState_STATE gstate;
+    // // int rescan_thresh = bookkeep_args->rescan_thresh;
+    // // then do fast scans
+    // // TODO: need to maintain a lock/signal to inform when to start/stop slow scan, during fast cycles
+    // int total_fast_num = 0;
+    // Temperature *temp_ptr;
+    // heat_node *node_ptr, *tmp;
+    // int fast_scan_idx = 0;
+    // int utlist_count;
+    // uintptr_t foundInner;
+    // uintptr_t prev_changed_max = 0;
+    // uintptr_t prev_changed_min = ULONG_MAX;
+    // uintptr_t no_93_upper = 100000000000000;
+    // int trigger_drop_thresh = 50; // percentage
+    // bool do_drop_unhot_op;
+    // clock_t cur_fast_start, cur_fast_end;
+    // all_heats_table *allHeats = all_heats_table_init(0);
+    // all_heats_table_locked_table *allHeats_locked = NULL;
     int total_num_slow = 0;
     double total_cur_cascading_time = 0.0;
     ts_blob outter_key_wrapper;
@@ -6103,21 +6054,28 @@ void *inspect_survived_objs(void *arg)
             usleep(100000); // 0.1s
             continue;
         }
+        PyGILState_STATE gstate = PyGILState_Ensure();
         khash_t(ptrset) *survived_op_set = kh_init(ptrset);
         // cur_survived_op_set = kh_init(ptrset);
-        double cur_cascading_time = try_cascading_old(survived_op_set, total_num_slow);
-        total_cur_cascading_time += cur_cascading_time;
+        klist_t(ptrlist) *survived_op_list = kl_init(ptrlist);
+        double cur_cascading_time = try_cascading_old(survived_op_list, survived_op_set, total_num_slow);
+        PyGILState_Release(gstate);
+        // if (gen_idx == 2)
+        {
+            total_cur_cascading_time += cur_cascading_time;
+            total_num_slow++;
+        }
 
         clock_gettime(CLOCK_MONOTONIC, &ts);
         outter_key_wrapper.cur_slow_idx = 0;
         outter_key_wrapper.ts = ts;
         uintptr_t casted_survived_set = (uintptr_t)survived_op_set;
         all_heats_table_insert(allHeats, &outter_key_wrapper, &casted_survived_set);
-        total_num_slow++;
         kh_destroy(ptrset, survived_op_set);
-        usleep(global_bookkeep_args->sample_dur); // 2.5s
+        kl_destroy(ptrlist, survived_op_list);
+        usleep(global_bookkeep_args->sample_dur);
     }
-    // if (bookkeep_args->doIO)
+    // if (global_bookkeep_args->doIO)
     if (0)
     {
         fprintf(stderr, "doing IO...\n");

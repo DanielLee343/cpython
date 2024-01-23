@@ -321,7 +321,9 @@ check by comparing the reference count field to the immortality reference count.
 
     typedef int (*objobjproc)(PyObject *, PyObject *);
     typedef int (*visitproc)(PyObject *, void *);
+    typedef int (*visitproc2)(PyObject *, void *, unsigned int);
     typedef int (*traverseproc)(PyObject *, visitproc, void *);
+    typedef int (*traverseproc2)(PyObject *, visitproc, void *, void *);
 
     typedef void (*freefunc)(void *);
     typedef void (*destructor)(PyObject *);

@@ -42,11 +42,10 @@ extern "C"
     delete_from_global_op_set(PyObject *op)
     {
         khint_t k;
-        k = kh_get(ptrset, global_op_set, (uintptr_t)op); // Get the position of the key in the set
+        k = kh_get(ptrset, global_op_set, op); // Get the position of the key in the set
 
         if (k != kh_end(global_op_set))
         {
-            // fprintf(stderr, "deleted\n");
             kh_del(ptrset, global_op_set, k); // Delete the key from the set
         }
     }
