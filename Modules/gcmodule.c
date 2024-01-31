@@ -73,6 +73,9 @@ static bool enable_bk;
 unsigned long get_live_time_thresh;
 #define PAGE_SIZE 4096
 #define MAX_ALLOWED_SIZE 1000000
+#define LEN_THRESHOLD 0
+#define DEPTH_THRESHOLD 1
+uintptr_t global_dummy;
 typedef struct heat_node
 {
     // uintptr_t op;
@@ -80,6 +83,15 @@ typedef struct heat_node
     Temperature *temp;
     struct heat_node *next, *prev;
 } heat_node;
+
+typedef struct GEN_ID_BOUND
+{
+    int gen_id;
+    uintptr_t low;
+    uintptr_t high;
+} GEN_ID_BOUND;
+
+GEN_ID_BOUND gen_id_bound[NUM_GENERATIONS];
 
 typedef struct cur_survived_node
 {
@@ -248,8 +260,15 @@ _PyGC_Init(PyInterpreterState *interp)
 {
     last_time = clock();
     enable_bk = false;
-    get_live_time_thresh = 200000000;
+    get_live_time_thresh = 200000000; // a pretty long time so by default don't do bk
+    for (int i = 0; i < NUM_GENERATIONS; i++)
+    {
+        gen_id_bound[i].gen_id = i;
+        gen_id_bound[i].low = UINTPTR_MAX;
+        gen_id_bound[i].high = 0;
+    }
     GCState *gcstate = &interp->gc;
+    global_dummy = 0;
 
     gcstate->garbage = PyList_New(0);
     if (gcstate->garbage == NULL)
@@ -1751,33 +1770,37 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     unsigned long cur_gen_size = 0;
     unsigned int max_allowed_ctn = global_bookkeep_args->max_allowed_ctn;
     op_depth_map = kh_init(ptr2int);
+    uintptr_t LOWER_BOUND = 100000000000000;
+    uintptr_t local_lowest_op = UINTPTR_MAX;
+    uintptr_t cur_gen_low_bound = gen_id_bound[gen_idx].low;
     // struct timespec ts;
     // clock_gettime(CLOCK_MONOTONIC, &ts);
     // append to survived_op_set
     {
         // unsigned long count = 0;
-        uintptr_t local_lowest_op = UINTPTR_MAX;
         for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
         {
             container_op = FROM_GC(gc);
+            uintptr_t casted_op = (uintptr_t)container_op;
             // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
             // if (cur_len > 5)
             //     continue;
-            // if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op))
-            //     continue;
             // try_append_survived_set(container_op, survived_op_list);
             // kh_put(ptrset, live_container_op_set, container_op, &ret);
-            if ((uintptr_t)container_op < glb_lowest_op)
+            if (casted_op < cur_gen_low_bound)
             {
-                if ((uintptr_t)container_op < local_lowest_op)
+                // if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op)) // this is slow
+                //     continue;
+                if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
                 {
-                    local_lowest_op = (uintptr_t)container_op;
+                    local_lowest_op = casted_op;
                 }
                 *kl_pushp(ptrlist, survived_op_list) = container_op;
             }
             // count++;
         }
-        glb_lowest_op = local_lowest_op;
+        gen_id_bound[gen_idx].low = local_lowest_op;
+        fprintf(stderr, "glb_lowest_op: %lu\n", gen_id_bound[gen_idx].low);
     }
     // fprintf(stderr, "global_old_last: %ld\n", (uintptr_t)global_old_last); // not informative
     // now, delete the collected objs
@@ -1805,20 +1828,27 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     // for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k) // for kh_set
     //     if (kh_exist(survived_op_set, k))
     kliter_t(ptrlist) * klist_iter;
+    global_dummy = 0;
     for (klist_iter = kl_begin(survived_op_list); klist_iter != kl_end(survived_op_list); klist_iter = kl_next(klist_iter))
     {
         PyObject *container = kl_val(klist_iter);
+        // unsigned long cur_len = Py_SIZE(container); // || cur_len > 10000000
+        // if (cur_len > LEN_THRESHOLD)
+        //     continue;
         // kh_put(ptrset, global_op_set, container, &ret);
-        // unsigned int combined = 0;
-        // update_recursive_visitor(container, &combined);
-        fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
+        insert_into_set((uintptr_t)container);
+        unsigned int combined = 0;
+        update_recursive_visitor(container, &combined);
+        // fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
     }
-    fflush(global_bookkeep_args->fd);
-    fprintf(stderr, "flush complete\n");
+    // fflush(global_bookkeep_args->fd);
+    // fprintf(stderr, "flush complete\n");
 
-    unsigned int global_op_size = kh_size(global_op_set);
-    unsigned long op_depth_map_size = kh_size(op_depth_map);
-    fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
+    // unsigned int global_op_size = kh_size(global_op_set);
+    // unsigned long op_depth_map_size = kh_size(op_depth_map);
+    // fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
+    unsigned int my_set_size = get_set_size();
+    fprintf(stderr, "my_set_size: %u\n", my_set_size);
 
     clock_t finish_cascading = clock();
     double time_spent_container = (double)(finish_container_traverse - start_traverse) / CLOCKS_PER_SEC;
@@ -1827,33 +1857,35 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     // if (slow_idx == 6)
     if (0)
     { // calculate average depth
-        unsigned long total_len = 0;
-        // for (k = kh_begin(op_depth_map); k != kh_end(op_depth_map); ++k)
-        // {
-        //     if (kh_exist(op_depth_map, k))
-        //     {
-        //         total_depth += kh_value(op_depth_map, k);
-        //     }
-        // }
+      // unsigned long total_len = 0;
+      // for (k = kh_begin(op_depth_map); k != kh_end(op_depth_map); ++k)
+      // {
+      //     if (kh_exist(op_depth_map, k))
+      //     {
+      //         total_depth += kh_value(op_depth_map, k);
+      //     }
+      // }
 
-        unsigned long len;
-        uintptr_t each_key;
-        kh_foreach(op_depth_map, each_key, len, {
-            // get each key
-            // uintptr_t each_op = kh_key(op_depth_map, each_key);
-            if (len > 5048432)
-                continue;
-            fprintf(stderr, "%s\t%lu\n", Py_TYPE(each_key)->tp_name, len);
-            total_len += len;
-        });
+        // unsigned long len;
+        // uintptr_t each_key;
+        // kh_foreach(op_depth_map, each_key, len, {
+        //     // get each key
+        //     // uintptr_t each_op = kh_key(op_depth_map, each_key);
+        //     if (len > 5048432)
+        //         continue;
+        //     fprintf(stderr, "%s\t%lu\n", Py_TYPE(each_key)->tp_name, len);
+        //     total_len += len;
+        // });
 
-        fflush(stderr);
-        float avg_len = (float)total_len / op_depth_map_size;
-        fprintf(stderr, "total_len: %lu, op_depth_map_size: %lu, avg depth: %.3f\n", total_len, op_depth_map_size, avg_len);
+        // fflush(stderr);
+        // float avg_len = (float)total_len / op_depth_map_size;
+        // fprintf(stderr, "total_len: %lu, op_depth_map_size: %lu, avg depth: %.3f\n", total_len, op_depth_map_size, avg_len);
     }
     // PyGILState_Release(gstate);
     kh_destroy(ptr2int, op_depth_map);
-    return time_spent_container;
+    // print_addr(global_bookkeep_args->fd, slow_idx);
+    free_set();
+    return time_spent_cascading;
 }
 
 static void add_to_survived_from_young(PyGC_Head *survived)
@@ -2464,16 +2496,24 @@ referentsvisit(PyObject *obj, PyObject *list)
 // static int cascadingvisitor(PyObject *inner_op, int *depth)
 static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 {
-    if (found_in_kset(inner_op))
+    // if (found_in_kset(inner_op))
+    if (check_in_set((uintptr_t)inner_op))
     {
         return 0;
     }
-    // *combined = (*combined & 0xFFFF0000) | (*combined & 0xFFFF) + 1;
-    *combined += 1;
-    // fprintf(stderr, "length: %u\n", *combined & 0xFFFF);
+
+    // *combined += 1; // increase length
+    // unsigned int extracted_len = *combined & 0xFFFF;
+    // if (extracted_len > LEN_THRESHOLD)
+    // {
+    //     return; // stop
+    // }
+    // fprintf(stderr, "length: %u\n", extracted_len);
 
     int ret;
     kh_put(ptrset, global_op_set, inner_op, &ret);
+    insert_into_set((uintptr_t)inner_op);
+    // global_dummy++;
     // inner_traversing(inner_op, combined); // for testing gc.get_referents()
     update_recursive_visitor(inner_op, combined); // for real
     return 0;
@@ -2584,6 +2624,7 @@ gc_get_referents(PyObject *self, PyObject *args)
     }
     unsigned int global_op_size = kh_size(global_op_set);
     fprintf(stderr, "global live op size: %u\n", global_op_size);
+
     return result;
     // return NULL;
 }
@@ -3532,11 +3573,20 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
+    { // skip large length objs
+      // unsigned long cur_len = Py_SIZE(each_op); // || cur_len > 10000000
+      // if (cur_len > LEN_THRESHOLD)
+      //     return;
+    }
 
     unsigned int last_length = *combined & 0xFFFF;
     *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
     *combined += (1 << 16);  // increase depths
-    unsigned int extractedDepth = (*combined >> 16);
+    // {                        // skip large depth objs
+    //     unsigned int extractedDepth = (*combined >> 16);
+    //     if (extractedDepth > DEPTH_THRESHOLD)
+    //         return;
+    // }
     traverse(each_op, (visitproc)cascadingvisitor, combined);
     *combined = (*combined & 0xFFFF0000) | last_length;
     // calculate length
@@ -6112,6 +6162,7 @@ void *inspect_survived_objs(void *arg)
         fprintf(stderr, "flushing time: %.3f seconds\n", whole_IO_time);
     }
     all_heats_table_free(allHeats);
+    free_set();
     fprintf(stderr, "total_num_slow: %d, total_cur_cascading_time: %.3f\n", total_num_slow, total_cur_cascading_time);
     kh_destroy(ptrset, collected_container_op_set);
     kh_destroy(ptrset, live_container_op_set);
