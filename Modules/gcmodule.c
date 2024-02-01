@@ -1837,6 +1837,7 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
         //     continue;
         // kh_put(ptrset, global_op_set, container, &ret);
         insert_into_set((uintptr_t)container);
+        // insert_into_global((uintptr_t)container);
         unsigned int combined = 0;
         update_recursive_visitor(container, &combined);
         // fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
@@ -1847,8 +1848,8 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     // unsigned int global_op_size = kh_size(global_op_set);
     // unsigned long op_depth_map_size = kh_size(op_depth_map);
     // fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
-    unsigned int my_set_size = get_set_size();
-    fprintf(stderr, "my_set_size: %u\n", my_set_size);
+    unsigned int my_set_size = get_global_size();
+    fprintf(stderr, "global_set_size: %u\n", my_set_size);
 
     clock_t finish_cascading = clock();
     double time_spent_container = (double)(finish_container_traverse - start_traverse) / CLOCKS_PER_SEC;
@@ -1885,7 +1886,7 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     kh_destroy(ptr2int, op_depth_map);
     // print_addr(global_bookkeep_args->fd, slow_idx);
     free_set();
-    return time_spent_cascading;
+    return time_spent_container + time_spent_cascading;
 }
 
 static void add_to_survived_from_young(PyGC_Head *survived)
@@ -2510,10 +2511,11 @@ static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
     // }
     // fprintf(stderr, "length: %u\n", extracted_len);
 
-    int ret;
-    kh_put(ptrset, global_op_set, inner_op, &ret);
+    // int ret;
+    // kh_put(ptrset, global_op_set, inner_op, &ret);
     insert_into_set((uintptr_t)inner_op);
-    // global_dummy++;
+    // insert_into_global((uintptr_t)inner_op);
+    global_dummy++;
     // inner_traversing(inner_op, combined); // for testing gc.get_referents()
     update_recursive_visitor(inner_op, combined); // for real
     return 0;
@@ -3553,9 +3555,6 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
         return;
     }
     // {
-    //     int ret;
-    //     kh_put(ptrset, global_op_set, (uintptr_t)each_op, &ret);
-
     //     khint_t k_dp;
     //     unsigned long cur_len = Py_SIZE(each_op);
     //     unsigned long cur_len = _PySys_GetSizeOf(each_op);

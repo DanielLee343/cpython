@@ -18,6 +18,7 @@
 #include "pycore_typeobject.h"    // _PyBufferWrapper_Type
 #include "pycore_unionobject.h"   // _PyUnion_Type
 #include "interpreteridobject.h"  // _PyInterpreterID_Type
+#include "myset.h"
 
 khash_t(ptrset) * global_op_set;
 
@@ -2859,6 +2860,7 @@ extern "C"
 #endif
         (*dealloc)(op);
         delete_from_global_op_set(op);
+        erase_from_global((uintptr_t)op);
 
 #ifdef Py_DEBUG
         // gh-89373: The tp_dealloc function must leave the current exception
