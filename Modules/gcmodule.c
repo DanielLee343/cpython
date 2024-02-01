@@ -1776,6 +1776,7 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     // struct timespec ts;
     // clock_gettime(CLOCK_MONOTONIC, &ts);
     // append to survived_op_set
+    if (0)
     {
         // unsigned long count = 0;
         for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
@@ -1802,52 +1803,68 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
         gen_id_bound[gen_idx].low = local_lowest_op;
         fprintf(stderr, "glb_lowest_op: %lu\n", gen_id_bound[gen_idx].low);
     }
+    {
+        for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
+        {
+            container_op = FROM_GC(gc);
+            if (check_in_global((uintptr_t)container_op))
+            {
+                continue;
+            }
+            insert_into_global((uintptr_t)container_op);
+            unsigned int combined = 0;
+            update_recursive_visitor(container_op, &combined);
+        }
+    }
     // fprintf(stderr, "global_old_last: %ld\n", (uintptr_t)global_old_last); // not informative
     // now, delete the collected objs
     remove_dead_container_op(); // TODO: double check if necessary
     clock_t finish_container_traverse = clock();
 
-    unsigned int live_size = kh_size(live_container_op_set);
-    unsigned int collected_size = kh_size(collected_container_op_set);
-    // unsigned int survived_size = kh_size(survived_op_set);
-    fprintf(stderr, "cur_gen_size: %lu, live_size: %u, collected_size: %u\n", cur_gen_size, live_size, collected_size);
-
-    if (!global_op_set)
+    if (0)
     {
-        fprintf(stderr, "UNLIKELY!!! global_op_set not initialized\n");
-        // return;
+        unsigned int live_size = kh_size(live_container_op_set);
+        unsigned int collected_size = kh_size(collected_container_op_set);
+        // unsigned int survived_size = kh_size(survived_op_set);
+        fprintf(stderr, "cur_gen_size: %lu, live_size: %u, collected_size: %u\n", cur_gen_size, live_size, collected_size);
+
+        if (!global_op_set)
+        {
+            fprintf(stderr, "UNLIKELY!!! global_op_set not initialized\n");
+            // return;
+        }
+        // if (!survived_size)
+        // {
+        //     fprintf(stderr, "No new survived objs\n");
+        // }
+        // PyGILState_STATE gstate = PyGILState_Ensure();
+
+        khint_t k;
+
+        // for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k) // for kh_set
+        //     if (kh_exist(survived_op_set, k))
+        kliter_t(ptrlist) * klist_iter;
+        global_dummy = 0;
+        for (klist_iter = kl_begin(survived_op_list); klist_iter != kl_end(survived_op_list); klist_iter = kl_next(klist_iter))
+        {
+            PyObject *container = kl_val(klist_iter);
+            // unsigned long cur_len = Py_SIZE(container); // || cur_len > 10000000
+            // if (cur_len > LEN_THRESHOLD)
+            //     continue;
+            // kh_put(ptrset, global_op_set, container, &ret);
+            insert_into_set((uintptr_t)container);
+            // insert_into_global((uintptr_t)container);
+            unsigned int combined = 0;
+            update_recursive_visitor(container, &combined);
+            // fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
+        }
+        // fflush(global_bookkeep_args->fd);
+        // fprintf(stderr, "flush complete\n");
+
+        // unsigned int global_op_size = kh_size(global_op_set);
+        // unsigned long op_depth_map_size = kh_size(op_depth_map);
+        // fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
     }
-    // if (!survived_size)
-    // {
-    //     fprintf(stderr, "No new survived objs\n");
-    // }
-    // PyGILState_STATE gstate = PyGILState_Ensure();
-
-    khint_t k;
-
-    // for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k) // for kh_set
-    //     if (kh_exist(survived_op_set, k))
-    kliter_t(ptrlist) * klist_iter;
-    global_dummy = 0;
-    for (klist_iter = kl_begin(survived_op_list); klist_iter != kl_end(survived_op_list); klist_iter = kl_next(klist_iter))
-    {
-        PyObject *container = kl_val(klist_iter);
-        // unsigned long cur_len = Py_SIZE(container); // || cur_len > 10000000
-        // if (cur_len > LEN_THRESHOLD)
-        //     continue;
-        // kh_put(ptrset, global_op_set, container, &ret);
-        insert_into_set((uintptr_t)container);
-        // insert_into_global((uintptr_t)container);
-        unsigned int combined = 0;
-        update_recursive_visitor(container, &combined);
-        // fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
-    }
-    // fflush(global_bookkeep_args->fd);
-    // fprintf(stderr, "flush complete\n");
-
-    // unsigned int global_op_size = kh_size(global_op_set);
-    // unsigned long op_depth_map_size = kh_size(op_depth_map);
-    // fprintf(stderr, "global live op size: %u, op_depth_map_size: %lu\n", global_op_size, op_depth_map_size);
     unsigned int my_set_size = get_global_size();
     fprintf(stderr, "global_set_size: %u\n", my_set_size);
 
@@ -2498,7 +2515,7 @@ referentsvisit(PyObject *obj, PyObject *list)
 static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 {
     // if (found_in_kset(inner_op))
-    if (check_in_set((uintptr_t)inner_op))
+    if (check_in_global((uintptr_t)inner_op))
     {
         return 0;
     }
@@ -2513,9 +2530,9 @@ static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 
     // int ret;
     // kh_put(ptrset, global_op_set, inner_op, &ret);
-    insert_into_set((uintptr_t)inner_op);
-    // insert_into_global((uintptr_t)inner_op);
-    global_dummy++;
+    // insert_into_set((uintptr_t)inner_op);
+    insert_into_global((uintptr_t)inner_op);
+    // global_dummy++;
     // inner_traversing(inner_op, combined); // for testing gc.get_referents()
     update_recursive_visitor(inner_op, combined); // for real
     return 0;
