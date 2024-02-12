@@ -7,8 +7,11 @@ find . -name '*.lto' -exec rm -f {} ';'
 find . -name '*.wasm' -exec rm -f {} ';'
 find . -name '*.lst' -exec rm -f {} ';'
 find build -name 'fficonfig.h' -exec rm -f {} ';' || true
+find: ‘build’: No such file or directory
 find build -name '*.py' -exec rm -f {} ';' || true
+find: ‘build’: No such file or directory
 find build -name '*.py[co]' -exec rm -f {} ';' || true
+find: ‘build’: No such file or directory
 rm -f pybuilddir.txt
 rm -f Lib/lib2to3/*Grammar*.pickle
 rm -f _bootstrap_python
@@ -19,6 +22,8 @@ rm -f Python/deepfreeze/*.[co]
 rm -f Python/frozen_modules/*.h
 rm -f Python/frozen_modules/MANIFEST
 find build -type f -a ! -name '*.gc??' -exec rm -f {} ';'
+find: ‘build’: No such file or directory
+make: [Makefile:2838: clean-retain-profile] Error 1 (ignored)
 rm -f Include/pydtrace_probes.h
 rm -f profile-gen-stamp
 # Profile data.
@@ -84,10 +89,14 @@ gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/w
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Objects/weakrefobject.o Objects/weakrefobject.c
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/asm_trampoline.o Python/asm_trampoline.S
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/_warnings.o Python/_warnings.c
+Objects/listobject.c:2876:1: warning: ‘list_traverse2’ defined but not used [-Wunused-function]
+ 2876 | list_traverse2(PyListObject *o, visitproc visit, void *arg, void *arg2)
+      | ^~~~~~~~~~~~~~
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/Python-ast.o Python/Python-ast.c
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/Python-tokenize.o Python/Python-tokenize.c
 g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/allHeats.o ./Python/allHeats.cpp
 g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/curHeats.o ./Python/curHeats.cpp
+g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/myset.o ./Python/myset.cpp
 In file included from Objects/object.c:21:
 ./Include/myset.h:14:5: warning: function declaration isn’t a prototype [-Wstrict-prototypes]
    14 |     void free_set();
@@ -133,22 +142,18 @@ Objects/object.c:46:43: warning: passing argument 2 of ‘kh_get_ptrset’ makes
 cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
 cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
 cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
-g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/myset.o ./Python/myset.cpp
-Objects/listobject.c:2876:1: warning: ‘list_traverse2’ defined but not used [-Wunused-function]
- 2876 | list_traverse2(PyListObject *o, visitproc visit, void *arg, void *arg2)
-      | ^~~~~~~~~~~~~~
-cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
-cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
-cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
-cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
-cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
-cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
 g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/op_gc.o ./Python/op_gc.cpp
+cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
+cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
+cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
 g++ -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/pages2move.o ./Python/pages2move.cpp
 cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
 cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
 cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/asdl.o Python/asdl.c
+cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
+cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
+cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
 cc1plus: warning: command-line option ‘-Wstrict-prototypes’ is valid for C/ObjC but not for C++
 cc1plus: warning: ‘-Werror=’ argument ‘-Werror=implicit-function-declaration’ is not valid for C++
 cc1plus: warning: command-line option ‘-std=c11’ is valid for C/ObjC but not for C++
@@ -214,6 +219,7 @@ gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/w
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE  -o Python/dtoa.o Python/dtoa.c
 In file included from Python/pylifecycle.c:14:
 Python/pylifecycle.c: In function ‘pycore_interp_init’:
+gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/formatter_unicode.o Python/formatter_unicode.c
 ./Include/internal/pycore_initconfig.h:43:11: warning: ‘status._type’ is used uninitialized [-Wuninitialized]
    43 |     ((err)._type != _PyStatus_TYPE_OK)
       |      ~~~~~^~~~~~
@@ -223,7 +229,6 @@ Python/pylifecycle.c:898:13: note: in expansion of macro ‘_PyStatus_EXCEPTION�
 Python/pylifecycle.c:894:18: note: ‘status’ declared here
   894 |         PyStatus status;
       |                  ^~~~~~
-gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/formatter_unicode.o Python/formatter_unicode.c
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/fileutils.o Python/fileutils.c
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/suggestions.o Python/suggestions.c
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Python/perf_trampoline.o Python/perf_trampoline.c
@@ -241,6 +246,13 @@ gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/wor
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_codecsmodule.c -o Modules/_codecsmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_collectionsmodule.c -o Modules/_collectionsmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/errnomodule.c -o Modules/errnomodule.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/_iomodule.c -o Modules/_io/_iomodule.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/iobase.c -o Modules/_io/iobase.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/fileio.c -o Modules/_io/fileio.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/bytesio.c -o Modules/_io/bytesio.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/bufferedio.c -o Modules/_io/bufferedio.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/textio.c -o Modules/_io/textio.o
+gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/stringio.c -o Modules/_io/stringio.o
 In file included from Modules/gcmodule.c:52:
 ./Include/pages2move.h:13:5: warning: function declaration isn’t a prototype [-Wstrict-prototypes]
    13 |     void free_pages2move();
@@ -262,7 +274,7 @@ Modules/gcmodule.c: In function ‘visit_reachable’:
 Modules/gcmodule.c:636:9: warning: unused variable ‘ret’ [-Wunused-variable]
   636 |     int ret;
       |         ^~~
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/_iomodule.c -o Modules/_io/_iomodule.o
+gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/itertoolsmodule.c -o Modules/itertoolsmodule.o
 In file included from ./Include/internal/pycore_object.h:26,
                  from Modules/gcmodule.c:30:
 Modules/gcmodule.c: In function ‘visit_reachable_add_to_live_container_op’:
@@ -372,43 +384,22 @@ Modules/gcmodule.c:1731:55: warning: passing argument 2 of ‘kh_get_ptrset’ m
 ./Include/internal/pycore_object.h:28:5: note: in expansion of macro ‘KHASH_SET_INIT_INT64’
    28 |     KHASH_SET_INIT_INT64(ptrset)
       |     ^~~~~~~~~~~~~~~~~~~~
-Modules/gcmodule.c: In function ‘try_append_survived_set’:
-Modules/gcmodule.c:1746:55: warning: passing argument 2 of ‘kh_get_ptrset’ makes integer from pointer without a cast [-Wint-conversion]
- 1746 |     khint_t k = kh_get(ptrset, live_container_op_set, op);
-      |                                                       ^~
-      |                                                       |
-      |                                                       PyObject * {aka struct _object *}
-/home/lyuze/workspace/klib/khash.h:483:45: note: in definition of macro ‘kh_get’
-  483 | #define kh_get(name, h, k) kh_get_##name(h, k)
-      |                                             ^
-/home/lyuze/workspace/klib/khash.h:230:69: note: expected ‘khint64_t’ {aka ‘long unsigned int’} but argument is of type ‘PyObject *’ {aka ‘struct _object *’}
-  230 |         SCOPE khint_t kh_get_##name(const kh_##name##_t *h, khkey_t key)        \
-      |                                                                     ^
-/home/lyuze/workspace/klib/khash.h:363:9: note: in expansion of macro ‘__KHASH_IMPL’
-  363 |         __KHASH_IMPL(name, SCOPE, khkey_t, khval_t, kh_is_map, __hash_func, __hash_equal)
-      |         ^~~~~~~~~~~~
-/home/lyuze/workspace/klib/khash.h:366:9: note: in expansion of macro ‘KHASH_INIT2’
-  366 |         KHASH_INIT2(name, static kh_inline klib_unused, khkey_t, khval_t, kh_is_map, __hash_func, __hash_equal)
-      |         ^~~~~~~~~~~
-/home/lyuze/workspace/klib/khash.h:601:9: note: in expansion of macro ‘KHASH_INIT’
-  601 |         KHASH_INIT(name, khint64_t, char, 0, kh_int64_hash_func, kh_int64_hash_equal)
-      |         ^~~~~~~~~~
-./Include/internal/pycore_object.h:28:5: note: in expansion of macro ‘KHASH_SET_INIT_INT64’
-   28 |     KHASH_SET_INIT_INT64(ptrset)
-      |     ^~~~~~~~~~~~~~~~~~~~
 Modules/gcmodule.c: In function ‘try_cascading_old’:
 Modules/gcmodule.c:1761:9: warning: ‘return’ with no value, in function returning non-void [-Wreturn-type]
  1761 |         return;
       |         ^~~~~~
 Modules/gcmodule.c:1756:15: note: declared here
- 1756 | static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptrset) * survived_op_set, int slow_idx)
+ 1756 | static double try_cascading_old(klist_t(ptrlist) * cur_klist, int slow_idx)
       |               ^~~~~~~~~~~~~~~~~
-Modules/gcmodule.c:1842:17: warning: unused variable ‘k’ [-Wunused-variable]
- 1842 |         khint_t k;
+Modules/gcmodule.c:1854:17: warning: unused variable ‘k’ [-Wunused-variable]
+ 1854 |         khint_t k;
       |                 ^
 Modules/gcmodule.c:1771:18: warning: unused variable ‘max_allowed_ctn’ [-Wunused-variable]
  1771 |     unsigned int max_allowed_ctn = global_bookkeep_args->max_allowed_ctn;
       |                  ^~~~~~~~~~~~~~~
+Modules/gcmodule.c:1770:19: warning: unused variable ‘cur_gen_size’ [-Wunused-variable]
+ 1770 |     unsigned long cur_gen_size = 0;
+      |                   ^~~~~~~~~~~~
 Modules/gcmodule.c:1766:13: warning: unused variable ‘k_dp’ [-Wunused-variable]
  1766 |     khint_t k_dp;
       |             ^~~~
@@ -419,29 +410,31 @@ Modules/gcmodule.c:1764:9: warning: unused variable ‘ret’ [-Wunused-variable
  1764 |     int ret;
       |         ^~~
 Modules/gcmodule.c: In function ‘add_to_survived_from_young’:
-Modules/gcmodule.c:1917:19: warning: unused variable ‘op’ [-Wunused-variable]
- 1917 |         PyObject *op = FROM_GC(gc);
+Modules/gcmodule.c:1938:19: warning: unused variable ‘op’ [-Wunused-variable]
+ 1938 |         PyObject *op = FROM_GC(gc);
       |                   ^~
-Modules/gcmodule.c:1914:9: warning: unused variable ‘ret’ [-Wunused-variable]
- 1914 |     int ret;
+Modules/gcmodule.c:1935:9: warning: unused variable ‘ret’ [-Wunused-variable]
+ 1935 |     int ret;
       |         ^~~
+gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_sre/sre.c -o Modules/_sre/sre.o
 Modules/gcmodule.c: In function ‘gc_get_referents’:
-Modules/gcmodule.c:2616:9: warning: unused variable ‘ret’ [-Wunused-variable]
- 2616 |     int ret;
+gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_threadmodule.c -o Modules/_threadmodule.o
+Modules/gcmodule.c:2641:9: warning: unused variable ‘ret’ [-Wunused-variable]
+ 2641 |     int ret;
       |         ^~~
-Modules/gcmodule.c:2611:16: warning: unused variable ‘heat_node_head’ [-Wunused-variable]
- 2611 |     heat_node *heat_node_head = NULL;
+Modules/gcmodule.c:2636:16: warning: unused variable ‘heat_node_head’ [-Wunused-variable]
+ 2636 |     heat_node *heat_node_head = NULL;
       |                ^~~~~~~~~~~~~~
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/iobase.c -o Modules/_io/iobase.o
+gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/timemodule.c -o Modules/timemodule.o
 Modules/gcmodule.c: In function ‘use_pref_cnt_modified’:
-Modules/gcmodule.c:5253:22: warning: variable ‘if_changed’ set but not used [-Wunused-but-set-variable]
- 5253 |                 bool if_changed = false;
+Modules/gcmodule.c:5278:22: warning: variable ‘if_changed’ set but not used [-Wunused-but-set-variable]
+ 5278 |                 bool if_changed = false;
       |                      ^~~~~~~~~~
 In file included from ./Include/internal/pycore_object.h:26,
                  from Modules/gcmodule.c:30:
 Modules/gcmodule.c: In function ‘found_in_kset’:
-Modules/gcmodule.c:5379:47: warning: passing argument 2 of ‘kh_get_ptrset’ makes integer from pointer without a cast [-Wint-conversion]
- 5379 |     khint_t k = kh_get(ptrset, global_op_set, op);
+Modules/gcmodule.c:5404:47: warning: passing argument 2 of ‘kh_get_ptrset’ makes integer from pointer without a cast [-Wint-conversion]
+ 5404 |     khint_t k = kh_get(ptrset, global_op_set, op);
       |                                               ^~
       |                                               |
       |                                               PyObject * {aka struct _object *}
@@ -463,89 +456,109 @@ Modules/gcmodule.c:5379:47: warning: passing argument 2 of ‘kh_get_ptrset’ m
 ./Include/internal/pycore_object.h:28:5: note: in expansion of macro ‘KHASH_SET_INIT_INT64’
    28 |     KHASH_SET_INIT_INT64(ptrset)
       |     ^~~~~~~~~~~~~~~~~~~~
+Modules/gcmodule.c: In function ‘found_in_dedup_set’:
+Modules/gcmodule.c:5414:53: warning: passing argument 2 of ‘kh_get_ptrset’ makes integer from pointer without a cast [-Wint-conversion]
+ 5414 |     khint_t k = kh_get(ptrset, cur_survived_op_set, op);
+      |                                                     ^~
+      |                                                     |
+      |                                                     PyObject * {aka struct _object *}
+/home/lyuze/workspace/klib/khash.h:483:45: note: in definition of macro ‘kh_get’
+  483 | #define kh_get(name, h, k) kh_get_##name(h, k)
+      |                                             ^
+/home/lyuze/workspace/klib/khash.h:230:69: note: expected ‘khint64_t’ {aka ‘long unsigned int’} but argument is of type ‘PyObject *’ {aka ‘struct _object *’}
+  230 |         SCOPE khint_t kh_get_##name(const kh_##name##_t *h, khkey_t key)        \
+      |                                                                     ^
+/home/lyuze/workspace/klib/khash.h:363:9: note: in expansion of macro ‘__KHASH_IMPL’
+  363 |         __KHASH_IMPL(name, SCOPE, khkey_t, khval_t, kh_is_map, __hash_func, __hash_equal)
+      |         ^~~~~~~~~~~~
+/home/lyuze/workspace/klib/khash.h:366:9: note: in expansion of macro ‘KHASH_INIT2’
+  366 |         KHASH_INIT2(name, static kh_inline klib_unused, khkey_t, khval_t, kh_is_map, __hash_func, __hash_equal)
+      |         ^~~~~~~~~~~
+/home/lyuze/workspace/klib/khash.h:601:9: note: in expansion of macro ‘KHASH_INIT’
+  601 |         KHASH_INIT(name, khint64_t, char, 0, kh_int64_hash_func, kh_int64_hash_equal)
+      |         ^~~~~~~~~~
+./Include/internal/pycore_object.h:28:5: note: in expansion of macro ‘KHASH_SET_INIT_INT64’
+   28 |     KHASH_SET_INIT_INT64(ptrset)
+      |     ^~~~~~~~~~~~~~~~~~~~
 Modules/gcmodule.c: In function ‘use_utlist’:
-Modules/gcmodule.c:5438:26: warning: unused variable ‘ret_depth’ [-Wunused-variable]
- 5438 |             int ret = 0, ret_depth = 0;
+Modules/gcmodule.c:5473:26: warning: unused variable ‘ret_depth’ [-Wunused-variable]
+ 5473 |             int ret = 0, ret_depth = 0;
       |                          ^~~~~~~~~
-Modules/gcmodule.c:5526:21: warning: unused variable ‘dummy_val_changed’ [-Wunused-variable]
- 5526 |             uint8_t dummy_val_changed = 0;
+Modules/gcmodule.c:5561:21: warning: unused variable ‘dummy_val_changed’ [-Wunused-variable]
+ 5561 |             uint8_t dummy_val_changed = 0;
       |                     ^~~~~~~~~~~~~~~~~
-Modules/gcmodule.c:5412:27: warning: unused variable ‘tmp’ [-Wunused-variable]
- 5412 |     heat_node *node_ptr, *tmp;
+Modules/gcmodule.c:5447:27: warning: unused variable ‘tmp’ [-Wunused-variable]
+ 5447 |     heat_node *node_ptr, *tmp;
       |                           ^~~
-Modules/gcmodule.c:5412:16: warning: unused variable ‘node_ptr’ [-Wunused-variable]
- 5412 |     heat_node *node_ptr, *tmp;
+Modules/gcmodule.c:5447:16: warning: unused variable ‘node_ptr’ [-Wunused-variable]
+ 5447 |     heat_node *node_ptr, *tmp;
       |                ^~~~~~~~
-Modules/gcmodule.c:5399:35: warning: unused variable ‘curHeats_locked’ [-Wunused-variable]
- 5399 |     cur_heats_table_locked_table *curHeats_locked = NULL;
+Modules/gcmodule.c:5434:35: warning: unused variable ‘curHeats_locked’ [-Wunused-variable]
+ 5434 |     cur_heats_table_locked_table *curHeats_locked = NULL;
       |                                   ^~~~~~~~~~~~~~~
-Modules/gcmodule.c:5398:22: warning: variable ‘curHeats’ set but not used [-Wunused-but-set-variable]
- 5398 |     cur_heats_table *curHeats = NULL;
+Modules/gcmodule.c:5433:22: warning: variable ‘curHeats’ set but not used [-Wunused-but-set-variable]
+ 5433 |     cur_heats_table *curHeats = NULL;
       |                      ^~~~~~~~
-Modules/gcmodule.c:5390:9: warning: unused variable ‘cur_slow_idx’ [-Wunused-variable]
- 5390 |     int cur_slow_idx = 0;
+Modules/gcmodule.c:5425:9: warning: unused variable ‘cur_slow_idx’ [-Wunused-variable]
+ 5425 |     int cur_slow_idx = 0;
       |         ^~~~~~~~~~~~
 Modules/gcmodule.c: In function ‘calculate_merge’:
-Modules/gcmodule.c:5856:44: warning: format ‘%ld’ expects argument of type ‘long int’, but argument 3 has type ‘void *’ [-Wformat=]
- 5856 |             fprintf(stderr, "not aligned %ld\n", pages[i]);
+Modules/gcmodule.c:5891:44: warning: format ‘%ld’ expects argument of type ‘long int’, but argument 3 has type ‘void *’ [-Wformat=]
+ 5891 |             fprintf(stderr, "not aligned %ld\n", pages[i]);
       |                                          ~~^     ~~~~~~~~
       |                                            |          |
       |                                            long int   void *
       |                                          %p
-Modules/gcmodule.c:5871:37: warning: format ‘%lu’ expects argument of type ‘long unsigned int’, but argument 3 has type ‘int’ [-Wformat=]
- 5871 |             fprintf(stderr, "Page %lu not moved: %d\n", i, status[i]);
+Modules/gcmodule.c:5906:37: warning: format ‘%lu’ expects argument of type ‘long unsigned int’, but argument 3 has type ‘int’ [-Wformat=]
+ 5906 |             fprintf(stderr, "Page %lu not moved: %d\n", i, status[i]);
       |                                   ~~^                   ~
       |                                     |                   |
       |                                     long unsigned int   int
       |                                   %u
-Modules/gcmodule.c:5866:10: warning: unused variable ‘ret’ [-Wunused-variable]
- 5866 |     long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
+Modules/gcmodule.c:5901:10: warning: unused variable ‘ret’ [-Wunused-variable]
+ 5901 |     long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
       |          ^~~
 Modules/gcmodule.c: In function ‘manual_trigger_scan’:
-Modules/gcmodule.c:5917:35: warning: unused variable ‘allHeats_locked’ [-Wunused-variable]
- 5917 |     all_heats_table_locked_table *allHeats_locked = NULL;
+Modules/gcmodule.c:5952:35: warning: unused variable ‘allHeats_locked’ [-Wunused-variable]
+ 5952 |     all_heats_table_locked_table *allHeats_locked = NULL;
       |                                   ^~~~~~~~~~~~~~~
-Modules/gcmodule.c:5916:22: warning: unused variable ‘allHeats’ [-Wunused-variable]
- 5916 |     all_heats_table *allHeats = all_heats_table_init(0);
+Modules/gcmodule.c:5951:22: warning: unused variable ‘allHeats’ [-Wunused-variable]
+ 5951 |     all_heats_table *allHeats = all_heats_table_init(0);
       |                      ^~~~~~~~
-Modules/gcmodule.c:5899:18: warning: unused variable ‘doIO_’ [-Wunused-variable]
- 5899 |     unsigned int doIO_ = bookkeep_args->doIO;
+Modules/gcmodule.c:5934:18: warning: unused variable ‘doIO_’ [-Wunused-variable]
+ 5934 |     unsigned int doIO_ = bookkeep_args->doIO;
       |                  ^~~~~
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/fileio.c -o Modules/_io/fileio.o
-Modules/gcmodule.c:6071:1: warning: control reaches end of non-void function [-Wreturn-type]
- 6071 | }
+Modules/gcmodule.c: In function ‘inspect_survived_objs’:
+Modules/gcmodule.c:6149:22: warning: unused variable ‘allHeats’ [-Wunused-variable]
+ 6149 |     all_heats_table *allHeats = all_heats_table_init(0);
+      |                      ^~~~~~~~
+Modules/gcmodule.c:6148:13: warning: variable ‘outter_key_wrapper’ set but not used [-Wunused-but-set-variable]
+ 6148 |     ts_blob outter_key_wrapper;
+      |             ^~~~~~~~~~~~~~~~~~
+Modules/gcmodule.c: In function ‘manual_trigger_scan’:
+Modules/gcmodule.c:6106:1: warning: control reaches end of non-void function [-Wreturn-type]
+ 6106 | }
       | ^
 Modules/gcmodule.c: In function ‘inspect_survived_objs’:
-Modules/gcmodule.c:6187:1: warning: control reaches end of non-void function [-Wreturn-type]
- 6187 | }
+Modules/gcmodule.c:6186:1: warning: control reaches end of non-void function [-Wreturn-type]
+ 6186 | }
       | ^
 At top level:
-Modules/gcmodule.c:3528:13: warning: ‘ismapped’ defined but not used [-Wunused-function]
- 3528 | static bool ismapped(const void *ptr, int bytes)
+Modules/gcmodule.c:3553:13: warning: ‘ismapped’ defined but not used [-Wunused-function]
+ 3553 | static bool ismapped(const void *ptr, int bytes)
       |             ^~~~~~~~
-Modules/gcmodule.c:2508:1: warning: ‘referentsvisit’ defined but not used [-Wunused-function]
- 2508 | referentsvisit(PyObject *obj, PyObject *list)
+Modules/gcmodule.c:2529:1: warning: ‘referentsvisit’ defined but not used [-Wunused-function]
+ 2529 | referentsvisit(PyObject *obj, PyObject *list)
       | ^~~~~~~~~~~~~~
-Modules/gcmodule.c:1909:13: warning: ‘add_to_survived_from_young’ defined but not used [-Wunused-function]
- 1909 | static void add_to_survived_from_young(PyGC_Head *survived)
+Modules/gcmodule.c:1930:13: warning: ‘add_to_survived_from_young’ defined but not used [-Wunused-function]
+ 1930 | static void add_to_survived_from_young(PyGC_Head *survived)
       |             ^~~~~~~~~~~~~~~~~~~~~~~~~~
-Modules/gcmodule.c:1744:13: warning: ‘try_append_survived_set’ defined but not used [-Wunused-function]
- 1744 | static void try_append_survived_set(PyObject *op, klist_t(ptrlist) * survived_op_list)
-      |             ^~~~~~~~~~~~~~~~~~~~~~~
 Modules/gcmodule.c:1710:13: warning: ‘try_trigger_slow_scan’ defined but not used [-Wunused-function]
  1710 | static void try_trigger_slow_scan()
       |             ^~~~~~~~~~~~~~~~~~~~~
 Modules/gcmodule.c:826:1: warning: ‘move_unreachable_add_to_live_container_op’ defined but not used [-Wunused-function]
   826 | move_unreachable_add_to_live_container_op(PyGC_Head *young, PyGC_Head *unreachable)
       | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/bytesio.c -o Modules/_io/bytesio.o
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/bufferedio.c -o Modules/_io/bufferedio.o
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/textio.c -o Modules/_io/textio.o
-gcc -I./Modules/_io -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_io/stringio.c -o Modules/_io/stringio.o
-gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/itertoolsmodule.c -o Modules/itertoolsmodule.o
-gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_sre/sre.c -o Modules/_sre/sre.o
-gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_threadmodule.c -o Modules/_threadmodule.o
-gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/timemodule.c -o Modules/timemodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_typingmodule.c -o Modules/_typingmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_weakref.c -o Modules/_weakref.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE_BUILTIN -c ./Modules/_abc.c -o Modules/_abc.o
@@ -1375,113 +1388,109 @@ In function ‘word_to_string’,
 ./Modules/_decimal/libmpdec/io.c:367:14: note: in expansion of macro ‘EXTRACT_DIGIT’
   367 |     case 8:  EXTRACT_DIGIT(s, x, 10000000UL, dot);
       |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:368:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  368 |     case 7:  EXTRACT_DIGIT(s, x, 1000000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:368:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  368 |     case 7:  EXTRACT_DIGIT(s, x, 1000000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
-      |              ^~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
-      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
-./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
-  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
-      |              ^~~~~~~~~~~~~
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_blake2/blake2module.c -o Modules/_blake2/blake2module.o
-Modules/gcmodule.c: In function ‘use_pref_cnt_modified’:
-Modules/gcmodule.c:5155:29: warning: ‘changed_op’ may be used uninitialized in this function [-Wmaybe-uninitialized]
- 5155 |                             op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
-      |                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:368:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  368 |     case 7:  EXTRACT_DIGIT(s, x, 1000000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:368:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  368 |     case 7:  EXTRACT_DIGIT(s, x, 1000000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:369:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  369 |     case 6:  EXTRACT_DIGIT(s, x, 100000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:370:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  370 |     case 5:  EXTRACT_DIGIT(s, x, 10000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:371:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  371 |     case 4:  EXTRACT_DIGIT(s, x, 1000UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:372:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  372 |     case 3:  EXTRACT_DIGIT(s, x, 100UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
+      |              ^~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:348:40: warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+  348 |         if (s == dot) *s++ = '.'; *s++ = '0' + (char)(x / d); x %= d
+      |                                   ~~~~~^~~~~~~~~~~~~~~~~~~~~
+./Modules/_decimal/libmpdec/io.c:373:14: note: in expansion of macro ‘EXTRACT_DIGIT’
+  373 |     case 2:  EXTRACT_DIGIT(s, x, 10UL, dot);
+      |              ^~~~~~~~~~~~~
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_blake2/blake2b_impl.c -o Modules/_blake2/blake2b_impl.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_blake2/blake2s_impl.c -o Modules/_blake2/blake2s_impl.o
 gcc -c -I./Modules/expat -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -o Modules/expat/xmlparse.o ./Modules/expat/xmlparse.c
@@ -1489,10 +1498,6 @@ gcc -c -I./Modules/expat -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wa
 gcc -c -I./Modules/expat -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -o Modules/expat/xmltok.o ./Modules/expat/xmltok.c
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/cjkcodecs/_codecs_cn.c -o Modules/cjkcodecs/_codecs_cn.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/cjkcodecs/_codecs_hk.c -o Modules/cjkcodecs/_codecs_hk.o
-Modules/gcmodule.c: In function ‘use_utlist’:
-Modules/gcmodule.c:5635:13: warning: ‘changed_op’ may be used uninitialized in this function [-Wmaybe-uninitialized]
- 5635 |             op_gc_table_free(changed_op);
-      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/cjkcodecs/_codecs_iso2022.c -o Modules/cjkcodecs/_codecs_iso2022.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/cjkcodecs/_codecs_jp.c -o Modules/cjkcodecs/_codecs_jp.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/cjkcodecs/_codecs_kr.c -o Modules/cjkcodecs/_codecs_kr.o
@@ -1510,6 +1515,10 @@ gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/wor
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/selectmodule.c -o Modules/selectmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/socketmodule.c -o Modules/socketmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/spwdmodule.c -o Modules/spwdmodule.o
+Modules/gcmodule.c: In function ‘use_pref_cnt_modified’:
+Modules/gcmodule.c:5180:29: warning: ‘changed_op’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+ 5180 |                             op_gc_table_insert(changed_op, &foundInner, &dummy_val_changed);
+      |                             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/syslogmodule.c -o Modules/syslogmodule.o
 gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/termios.c -o Modules/termios.o
 gcc -I./Modules/_multiprocessing -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_multiprocessing/posixshmem.c -o Modules/_multiprocessing/posixshmem.o
@@ -1528,6 +1537,10 @@ gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wal
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/microprotocols.c -o Modules/_sqlite/microprotocols.o
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/module.c -o Modules/_sqlite/module.o
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/prepare_protocol.c -o Modules/_sqlite/prepare_protocol.o
+Modules/gcmodule.c: In function ‘use_utlist’:
+Modules/gcmodule.c:5670:13: warning: ‘changed_op’ may be used uninitialized in this function [-Wmaybe-uninitialized]
+ 5670 |             op_gc_table_free(changed_op);
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/row.c -o Modules/_sqlite/row.o
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/statement.c -o Modules/_sqlite/statement.o
 gcc -I./Modules/_sqlite -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_sqlite/util.c -o Modules/_sqlite/util.o
@@ -1584,8 +1597,8 @@ gcc  -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/wor
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE -o Programs/_testembed.o ./Programs/_testembed.c
 sed -e "s,/usr/bin/env python3,/usr/local/bin/python3.12," < ./Tools/scripts/2to3 > build/scripts-3.12/2to3-3.12
 sed -e "s,/usr/bin/env python3,/usr/local/bin/python3.12," < ./Tools/scripts/idle3 > build/scripts-3.12/idle3.12
-gcc -shared      Modules/arraymodule.o   -o Modules/array.cpython-312-x86_64-linux-gnu.so
 sed -e "s,/usr/bin/env python3,/usr/local/bin/python3.12," < ./Tools/scripts/pydoc3 > build/scripts-3.12/pydoc3.12
+gcc -shared      Modules/arraymodule.o   -o Modules/array.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_asynciomodule.o   -o Modules/_asyncio.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_bisectmodule.o   -o Modules/_bisect.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_contextvarsmodule.o   -o Modules/_contextvars.cpython-312-x86_64-linux-gnu.so
@@ -1619,6 +1632,7 @@ gcc -shared      Modules/cjkcodecs/_codecs_jp.o   -o Modules/_codecs_jp.cpython-
 gcc -shared      Modules/cjkcodecs/_codecs_kr.o   -o Modules/_codecs_kr.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/cjkcodecs/_codecs_tw.o   -o Modules/_codecs_tw.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/cjkcodecs/multibytecodec.o   -o Modules/_multibytecodec.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/unicodedata.o   -o Modules/unicodedata.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_cryptmodule.o -lcrypt  -o Modules/_crypt.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/fcntlmodule.o   -o Modules/fcntl.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/grpmodule.o   -o Modules/grp.cpython-312-x86_64-linux-gnu.so
@@ -1634,41 +1648,40 @@ gcc -shared      Modules/termios.o   -o Modules/termios.cpython-312-x86_64-linux
 gcc -shared      Modules/_multiprocessing/posixshmem.o   -o Modules/_posixshmem.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_multiprocessing/multiprocessing.o Modules/_multiprocessing/semaphore.o   -o Modules/_multiprocessing.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_curses_panel.o -lpanelw -lncursesw -ltinfo  -o Modules/_curses_panel.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_hashopenssl.o -lcrypto  -o Modules/_hashlib.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_sqlite/blob.o Modules/_sqlite/connection.o Modules/_sqlite/cursor.o Modules/_sqlite/microprotocols.o Modules/_sqlite/module.o Modules/_sqlite/prepare_protocol.o Modules/_sqlite/row.o Modules/_sqlite/statement.o Modules/_sqlite/util.o -lsqlite3  -o Modules/_sqlite3.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_uuidmodule.o -luuid  -o Modules/_uuid.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/xxsubtype.o   -o Modules/xxsubtype.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_xxtestfuzz/_xxtestfuzz.o Modules/_xxtestfuzz/fuzzer.o   -o Modules/_xxtestfuzz.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_testinternalcapi.o   -o Modules/_testinternalcapi.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_testimportmultiple.o   -o Modules/_testimportmultiple.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_testmultiphase.o   -o Modules/_testmultiphase.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_testsinglephase.o   -o Modules/_testsinglephase.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_ctypes/_ctypes_test.o -lm  -o Modules/_ctypes_test.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/xxlimited.o   -o Modules/xxlimited.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/xxlimited_35.o   -o Modules/xxlimited_35.cpython-312-x86_64-linux-gnu.so
 rm -f Modules/_hacl/libHacl_Hash_SHA2.a
-gcc -shared      Modules/unicodedata.o   -o Modules/unicodedata.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_testmultiphase.o   -o Modules/_testmultiphase.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_ctypes/_ctypes_test.o -lm  -o Modules/_ctypes_test.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_hashopenssl.o -lcrypto  -o Modules/_hashlib.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_tkinter.o Modules/tkappinit.o -ltk8.6 -ltkstub8.6 -ltcl8.6 -ltclstub8.6  -o Modules/_tkinter.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_testbuffer.o   -o Modules/_testbuffer.cpython-312-x86_64-linux-gnu.so
 ar rcs Modules/_hacl/libHacl_Hash_SHA2.a Modules/_hacl/Hacl_Hash_SHA2.o
 gcc  -I./Modules/_hacl/include -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/sha2module.c -o Modules/sha2module.o
 gcc -shared      Modules/socketmodule.o   -o Modules/_socket.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_testbuffer.o   -o Modules/_testbuffer.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_sqlite/blob.o Modules/_sqlite/connection.o Modules/_sqlite/cursor.o Modules/_sqlite/microprotocols.o Modules/_sqlite/module.o Modules/_sqlite/prepare_protocol.o Modules/_sqlite/row.o Modules/_sqlite/statement.o Modules/_sqlite/util.o -lsqlite3  -o Modules/_sqlite3.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_tkinter.o Modules/tkappinit.o -ltk8.6 -ltkstub8.6 -ltcl8.6 -ltclstub8.6  -o Modules/_tkinter.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_cursesmodule.o -lncursesw -ltinfo  -o Modules/_curses.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/sha2module.o  Modules/_hacl/libHacl_Hash_SHA2.a  -o Modules/_sha2.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_pickle.o   -o Modules/_pickle.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_datetimemodule.o -lm  -o Modules/_datetime.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_ctypes/_ctypes.o Modules/_ctypes/callbacks.o Modules/_ctypes/callproc.o Modules/_ctypes/stgdict.o Modules/_ctypes/cfield.o -lffi -ldl  -o Modules/_ctypes.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/sha2module.o  Modules/_hacl/libHacl_Hash_SHA2.a  -o Modules/_sha2.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_ssl.o -lssl -lcrypto  -o Modules/_ssl.cpython-312-x86_64-linux-gnu.so
-gcc -shared      Modules/_cursesmodule.o -lncursesw -ltinfo  -o Modules/_curses.cpython-312-x86_64-linux-gnu.so
+gcc -shared      Modules/_testclinic.o   -o Modules/_testclinic.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_testcapimodule.o Modules/_testcapi/vectorcall.o Modules/_testcapi/vectorcall_limited.o Modules/_testcapi/heaptype.o Modules/_testcapi/abstract.o Modules/_testcapi/bytearray.o Modules/_testcapi/bytes.o Modules/_testcapi/unicode.o Modules/_testcapi/dict.o Modules/_testcapi/set.o Modules/_testcapi/list.o Modules/_testcapi/tuple.o Modules/_testcapi/getargs.o Modules/_testcapi/pytime.o Modules/_testcapi/datetime.o Modules/_testcapi/docstring.o Modules/_testcapi/mem.o Modules/_testcapi/watchers.o Modules/_testcapi/long.o Modules/_testcapi/float.o Modules/_testcapi/complex.o Modules/_testcapi/numbers.o Modules/_testcapi/structmember.o Modules/_testcapi/exceptions.o Modules/_testcapi/code.o Modules/_testcapi/buffer.o Modules/_testcapi/pyos.o Modules/_testcapi/file.o Modules/_testcapi/codec.o Modules/_testcapi/immortal.o Modules/_testcapi/heaptype_relative.o Modules/_testcapi/gc.o Modules/_testcapi/sys.o   -o Modules/_testcapi.cpython-312-x86_64-linux-gnu.so
 rm -f Modules/expat/libexpat.a
 ar rcs Modules/expat/libexpat.a Modules/expat/xmlparse.o Modules/expat/xmlrole.o Modules/expat/xmltok.o
 gcc -I./Modules/expat -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/pyexpat.c -o Modules/pyexpat.o
 gcc -I./Modules/expat -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_elementtree.c -o Modules/_elementtree.o
-gcc -shared      Modules/_testclinic.o   -o Modules/_testclinic.cpython-312-x86_64-linux-gnu.so
 rm -f Modules/_decimal/libmpdec/libmpdec.a
 ar rcs Modules/_decimal/libmpdec/libmpdec.a Modules/_decimal/libmpdec/basearith.o Modules/_decimal/libmpdec/constants.o Modules/_decimal/libmpdec/context.o Modules/_decimal/libmpdec/convolute.o Modules/_decimal/libmpdec/crt.o Modules/_decimal/libmpdec/difradix2.o Modules/_decimal/libmpdec/fnt.o Modules/_decimal/libmpdec/fourstep.o Modules/_decimal/libmpdec/io.o Modules/_decimal/libmpdec/mpalloc.o Modules/_decimal/libmpdec/mpdecimal.o Modules/_decimal/libmpdec/numbertheory.o Modules/_decimal/libmpdec/sixstep.o Modules/_decimal/libmpdec/transpose.o
-gcc -shared      Modules/pyexpat.o -lm Modules/expat/libexpat.a  -o Modules/pyexpat.cpython-312-x86_64-linux-gnu.so
 gcc -I./Modules/_decimal/libmpdec -DCONFIG_64=1 -DANSI=1 -DHAVE_UINT128_T=1 -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -fPIC -c ./Modules/_decimal/_decimal.c -o Modules/_decimal/_decimal.o
+gcc -shared      Modules/pyexpat.o -lm Modules/expat/libexpat.a  -o Modules/pyexpat.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_elementtree.o   -o Modules/_elementtree.cpython-312-x86_64-linux-gnu.so
 gcc -shared      Modules/_decimal/_decimal.o -lm Modules/_decimal/libmpdec/libmpdec.a  -o Modules/_decimal.cpython-312-x86_64-linux-gnu.so
 gcc -c -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O3 -Wall -I/home/lyuze/workspace/uthash/src -I/home/lyuze/workspace/klib   -std=c11 -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wstrict-prototypes -Werror=implicit-function-declaration -fvisibility=hidden  -I./Include/internal -I/home/lyuze/workspace/libcuckoo/install/include -I. -I./Include    -DPy_BUILD_CORE \
@@ -1720,13 +1733,13 @@ initing global_op_set
 ./_bootstrap_python ./Programs/_freeze_module.py __phello__ ./Lib/__phello__/__init__.py Python/frozen_modules/__phello__.h
 initing global_op_set
 initing global_op_set
-./_bootstrap_python ./Programs/_freeze_module.py __phello__.ham ./Lib/__phello__/ham/__init__.py Python/frozen_modules/__phello__.ham.h
-./_bootstrap_python ./Programs/_freeze_module.py __phello__.ham.eggs ./Lib/__phello__/ham/eggs.py Python/frozen_modules/__phello__.ham.eggs.h
 initing global_op_set
+./_bootstrap_python ./Programs/_freeze_module.py __phello__.ham ./Lib/__phello__/ham/__init__.py Python/frozen_modules/__phello__.ham.h
+initing global_op_set
+./_bootstrap_python ./Programs/_freeze_module.py __phello__.ham.eggs ./Lib/__phello__/ham/eggs.py Python/frozen_modules/__phello__.ham.eggs.h
 initing global_op_set
 ./_bootstrap_python ./Programs/_freeze_module.py __phello__.spam ./Lib/__phello__/spam.py Python/frozen_modules/__phello__.spam.h
 ./_bootstrap_python ./Programs/_freeze_module.py frozen_only ./Tools/freeze/flag.py Python/frozen_modules/frozen_only.h
-initing global_op_set
 initing global_op_set
 initing global_op_set
 initing global_op_set

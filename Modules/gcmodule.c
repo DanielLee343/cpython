@@ -51,17 +51,22 @@
 
 #include "pages2move.h"
 #include "myset.h"
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex;
+pthread_mutexattr_t attr;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_slow = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_fast = PTHREAD_COND_INITIALIZER;
+static double total_cur_cascading_time = 0.0;
+static int total_num_slow = 0;
 
 khash_t(ptrset) * h;                          // for use_utlist
 khash_t(ptrset) * live_container_op_set;      // contains all live container objs (including newly survived)
 khash_t(ptrset) * collected_container_op_set; // contains collected (dead) objects
-// khash_t(ptrset) * cur_survived_op_set;        // contains current survived objects
+khash_t(ptrset) * cur_survived_op_set;        // contains current survived objects
 extern khash_t(ptrset) * global_op_set;
-#include "klist.h"
-#define __int_free(x)
-KLIST_INIT(ptrlist, PyObject *, __int_free)
+
+klist_t(ptrlist) * survived_op_list;
+kvec_t(PyObject *) local_ptr_vec;
 
 KHASH_MAP_INIT_INT64(ptr2int, int)
 khash_t(ptr2int) * op_depth_map;
@@ -72,9 +77,9 @@ static clock_t last_time;
 static bool enable_bk;
 unsigned long get_live_time_thresh;
 #define PAGE_SIZE 4096
-#define MAX_ALLOWED_SIZE 1000000
 #define LEN_THRESHOLD 0
-#define DEPTH_THRESHOLD 1
+#define DEPTH_THRESHOLD 100
+#define LOWER_BOUND 100000000000000
 uintptr_t global_dummy;
 typedef struct heat_node
 {
@@ -83,7 +88,14 @@ typedef struct heat_node
     Temperature *temp;
     struct heat_node *next, *prev;
 } heat_node;
-
+typedef struct
+{
+    PyObject *op;
+    long prev_refcnt;
+    long diffs[23]; // TODO: consider using smaller type
+    size_t cur_sizeof;
+} OBJ_TEMP;
+OBJ_TEMP *all_temps = NULL;
 typedef struct GEN_ID_BOUND
 {
     int gen_id;
@@ -100,8 +112,6 @@ typedef struct cur_survived_node
     struct cur_survived_node *next, *prev;
 } cur_survived_node;
 
-pthread_mutex_t mutex;
-pthread_cond_t cond_slow, cond_fast; // condA for slow, condB for fast
 int allow_fast = 0;
 int allow_slow = 0;
 PyGC_Head *global_old;
@@ -136,6 +146,7 @@ void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table *table);
 void update_recursive_visitor(PyObject *each_op, unsigned int *depth);
 void inner_traversing(PyObject *each_op, unsigned int *depth);
 bool found_in_kset(PyObject *op);
+bool found_in_local_kset(PyObject *op);
 void append_to_heat_node_cannot_partial_free(heat_node **starting_node); // malloc a heat_node pool from kh set, but cannot partially free
 void append_to_heat_node_flexibel_free(heat_node **starting_node);       // malloc each heat_node separately, can partially free
 static void add_to_survived_from_young(PyGC_Head *survived);
@@ -260,7 +271,7 @@ _PyGC_Init(PyInterpreterState *interp)
 {
     last_time = clock();
     enable_bk = false;
-    get_live_time_thresh = 200000000; // a pretty long time so by default don't do bk
+    get_live_time_thresh = INT_MAX; // don't trigger slow scan by default
     for (int i = 0; i < NUM_GENERATIONS; i++)
     {
         gen_id_bound[i].gen_id = i;
@@ -1654,129 +1665,23 @@ int check_object_type(PyObject *obj)
         return 1;
     return 0;
 }
-
-static void do_slow_scan()
+static double try_cascading_old(int slow_idx)
 {
-    pthread_mutex_lock(&mutex);
-    while (allow_slow != 1)
-    {
-        pthread_cond_wait(&cond_slow, &mutex); // wait for cond_slow to be signaled
-    }
-    allow_fast = 0;
-
-    fprintf(stderr, "doing slow scan..., thresh is %u\n", get_live_time_thresh);
     PyGILState_STATE gstate = PyGILState_Ensure();
-    empty_global_heat_utlist();
-    op_gc_table *cur_op_gc_table = op_gc_table_init(0); // for upper most layer container objs, freed immediately after this call
-    gc_get_objects_impl_op_gc(-1, cur_op_gc_table);
-    // start cascading
-    op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table);
-    op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
-    op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
-    uintptr_t foundInner;
-    heat_node *elt;
-    int utlist_count;
-    for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
-    {
-        foundInner = *op_gc_table_iterator_key(op_gc_it);
-        PyObject *container_op = (PyObject *)foundInner;
-        if (check_object_type(container_op) == 1)
-        {
-            continue;
-        }
-        Temperature *dummy_temp = malloc(sizeof(Temperature)); // TODO: considering pre-malloc a bunch of dummy_temp at once and assign here, but how much?
-        heat_node *each_node = malloc(sizeof(heat_node));
-        each_node->temp = dummy_temp;
-        each_node->op = container_op;
-        DL_APPEND(global_heat_utlist, each_node);
-        insert_into_set(foundInner);
-        update_recursive_utlist(container_op, &global_heat_utlist);
-    }
-    PyGILState_Release(gstate);
-    // print and free
-    DL_COUNT(global_heat_utlist, elt, utlist_count);
-    fprintf(stderr, "# live objs: %d\n", utlist_count);
-    op_gc_table_iterator_free(op_gc_end);
-    op_gc_table_iterator_free(op_gc_it);
-    op_gc_table_locked_table_free(cur_op_gc_locked_table);
-    op_gc_table_free(cur_op_gc_table);
-
-    last_time = clock();
-    allow_fast = 1;                  // allow fast to start, if any
-    pthread_cond_signal(&cond_fast); // Signal fast scan, if any
-    pthread_mutex_unlock(&mutex);
-}
-
-static void try_trigger_slow_scan()
-{
-    if (!enable_bk)
-        return;
-    clock_t cur_time = clock();
-    long time_elapsed = cur_time - last_time;
-    if (time_elapsed < get_live_time_thresh)
-        return;
-    do_slow_scan();
-}
-
-void remove_dead_container_op()
-{
-    if (!collected_container_op_set || !live_container_op_set)
-        return;
-    khint_t k;
-    for (k = kh_begin(collected_container_op_set); k != kh_end(collected_container_op_set); ++k)
-    {
-        if (kh_exist(collected_container_op_set, k))
-        {
-            PyObject *key = kh_key(collected_container_op_set, k);
-            if (kh_get(ptrset, live_container_op_set, key) != kh_end(live_container_op_set))
-            {
-                kh_del(ptrset, live_container_op_set, k);
-            }
-            // if (kh_get(ptrset, cur_survived_op_set, key) != kh_end(cur_survived_op_set))
-            // {
-            //     kh_del(ptrset, cur_survived_op_set, k);
-            // }
-        }
-    }
-}
-
-// static void try_append_survived_set(PyObject *op, khash_t(ptrset) * survived_op_set)
-static void try_append_survived_set(PyObject *op, klist_t(ptrlist) * survived_op_list)
-{
-    khint_t k = kh_get(ptrset, live_container_op_set, op);
-    if (k == kh_end(live_container_op_set))
-    {
-        // return;
-        *kl_pushp(ptrlist, survived_op_list) = op;
-        // int ret;
-        // kh_put(ptrset, survived_op_set, (uintptr_t)op, &ret);
-    }
-}
-
-static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptrset) * survived_op_set, int slow_idx)
-{
-    // fprintf(stderr, "survived_op_set: %ld\n", (uintptr_t)survived_op_set);
-    // PyGILState_STATE gstate = PyGILState_Ensure();
     if (!enable_bk || !global_old || gen_idx == -1)
         return;
     PyGC_Head *gc;
     PyObject *container_op;
     int ret;
-    int ret_;
-    khint_t k_dp;
-    fprintf(stderr, "inspectin survived objs...\n");
     clock_t start_traverse = clock();
     fprintf(stderr, "global_old: %ld, generation: %d\n", (uintptr_t)global_old, gen_idx);
-    unsigned long cur_gen_size = 0;
-    unsigned int max_allowed_ctn = global_bookkeep_args->max_allowed_ctn;
-    op_depth_map = kh_init(ptr2int);
-    uintptr_t LOWER_BOUND = 100000000000000;
+    // op_depth_map = kh_init(ptr2int);
     uintptr_t local_lowest_op = UINTPTR_MAX;
     uintptr_t cur_gen_low_bound = gen_id_bound[gen_idx].low;
     // struct timespec ts;
     // clock_gettime(CLOCK_MONOTONIC, &ts);
     // append to survived_op_set
-    if (0)
+    if (0) // append first, cascade later
     {
         // unsigned long count = 0;
         for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
@@ -1796,48 +1701,66 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
                 {
                     local_lowest_op = casted_op;
                 }
-                *kl_pushp(ptrlist, survived_op_list) = container_op;
+                kv_push(PyObject *, local_ptr_vec, container_op);
             }
             // count++;
         }
         gen_id_bound[gen_idx].low = local_lowest_op;
         fprintf(stderr, "glb_lowest_op: %lu\n", gen_id_bound[gen_idx].low);
     }
+    // if (0) // directly insert to global set
     {
         for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
         {
             container_op = FROM_GC(gc);
-            if (check_in_global((uintptr_t)container_op))
+            uintptr_t casted_op = (uintptr_t)container_op;
+            if (casted_op < cur_gen_low_bound)
             {
-                continue;
+                // if (found_in_kset(container_op))
+                if (check_in_global(casted_op))
+                // if (found_in_local_kset(container_op))
+                {
+                    continue;
+                }
+                // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
+                // if (cur_len > LEN_THRESHOLD)
+                //     continue;
+                if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
+                {
+                    local_lowest_op = casted_op;
+                }
+                // kh_put(ptrset, global_op_set, container_op, &ret);
+                // kh_put(ptrset, cur_survived_op_set, container_op, &ret);
+                insert_into_global(casted_op);
+                kv_push(PyObject *, local_ptr_vec, container_op); // vector, dynamic resizing
+                // *kl_pushp(ptrlist, survived_op_list) = container_op;
+                unsigned int combined = 0;
+                update_recursive_visitor(container_op, &combined); // cascading
             }
-            insert_into_global((uintptr_t)container_op);
-            unsigned int combined = 0;
-            update_recursive_visitor(container_op, &combined);
         }
+        gen_id_bound[gen_idx].low = local_lowest_op;
     }
     // fprintf(stderr, "global_old_last: %ld\n", (uintptr_t)global_old_last); // not informative
     // now, delete the collected objs
-    remove_dead_container_op(); // TODO: double check if necessary
+    // remove_dead_container_op(); // TODO: double check if necessary
     clock_t finish_container_traverse = clock();
 
     if (0)
+    // PyGILState_STATE gstate = PyGILState_Ensure();
     {
-        unsigned int live_size = kh_size(live_container_op_set);
-        unsigned int collected_size = kh_size(collected_container_op_set);
-        // unsigned int survived_size = kh_size(survived_op_set);
-        fprintf(stderr, "cur_gen_size: %lu, live_size: %u, collected_size: %u\n", cur_gen_size, live_size, collected_size);
+        // unsigned int live_size = kh_size(live_container_op_set);
+        // unsigned int collected_size = kh_size(collected_container_op_set);
+        // // unsigned int survived_size = kh_size(survived_op_set);
+        // fprintf(stderr, "live_size: %u, collected_size: %u\n", live_size, collected_size);
 
-        if (!global_op_set)
-        {
-            fprintf(stderr, "UNLIKELY!!! global_op_set not initialized\n");
-            // return;
-        }
+        // if (!global_op_set)
+        // {
+        //     fprintf(stderr, "UNLIKELY!!! global_op_set not initialized\n");
+        // }
         // if (!survived_size)
         // {
         //     fprintf(stderr, "No new survived objs\n");
         // }
-        // PyGILState_STATE gstate = PyGILState_Ensure();
 
         khint_t k;
 
@@ -1845,15 +1768,25 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
         //     if (kh_exist(survived_op_set, k))
         kliter_t(ptrlist) * klist_iter;
         global_dummy = 0;
-        for (klist_iter = kl_begin(survived_op_list); klist_iter != kl_end(survived_op_list); klist_iter = kl_next(klist_iter))
+        unsigned int kv_size = kv_size(local_ptr_vec);
+        for (int i = 0; i < kv_size; i++)
         {
-            PyObject *container = kl_val(klist_iter);
+            PyObject *container = kv_A(local_ptr_vec, i);
+            uintptr_t casted_container_op = (uintptr_t)container;
+            // if (check_in_set(casted_container_op))
+            // if (found_in_kset(container))
+            if (check_in_global(casted_container_op))
+            {
+                continue;
+            }
             // unsigned long cur_len = Py_SIZE(container); // || cur_len > 10000000
             // if (cur_len > LEN_THRESHOLD)
             //     continue;
             // kh_put(ptrset, global_op_set, container, &ret);
-            insert_into_set((uintptr_t)container);
-            // insert_into_global((uintptr_t)container);
+            // kh_put(ptrset, cur_survived_op_set, container, &ret);
+            // insert_into_set(casted_container_op);
+            insert_into_global(casted_container_op);
+            // *kl_pushp(ptrlist, survived_op_list) = container;
             unsigned int combined = 0;
             update_recursive_visitor(container, &combined);
             // fprintf(global_bookkeep_args->fd, "%ld\t%d\n", (uintptr_t)container, slow_idx);
@@ -1867,6 +1800,7 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
     }
     unsigned int my_set_size = get_global_size();
     fprintf(stderr, "global_set_size: %u\n", my_set_size);
+    fprintf(stderr, "local_ptr_vec size: %u\n", kv_size(local_ptr_vec));
 
     clock_t finish_cascading = clock();
     double time_spent_container = (double)(finish_container_traverse - start_traverse) / CLOCKS_PER_SEC;
@@ -1899,12 +1833,169 @@ static double try_cascading_old(klist_t(ptrlist) * survived_op_list, khash_t(ptr
         // float avg_len = (float)total_len / op_depth_map_size;
         // fprintf(stderr, "total_len: %lu, op_depth_map_size: %lu, avg depth: %.3f\n", total_len, op_depth_map_size, avg_len);
     }
-    // PyGILState_Release(gstate);
-    kh_destroy(ptr2int, op_depth_map);
+    PyGILState_Release(gstate);
+    // kh_destroy(ptr2int, op_depth_map);
     // print_addr(global_bookkeep_args->fd, slow_idx);
-    free_set();
     return time_spent_container + time_spent_cascading;
 }
+unsigned int old_num_op = 0;
+void gen_temps()
+{
+    clock_t t;
+    t = clock();
+    unsigned int num_op;
+    if (!all_temps && kv_size(local_ptr_vec) > 0)
+    {
+        // first time --> malloc
+        num_op = kv_size(local_ptr_vec);
+        all_temps = (OBJ_TEMP *)malloc(num_op * sizeof(OBJ_TEMP));
+        if (all_temps == NULL)
+        {
+            fprintf(stderr, "Failed to allocate memory for all ops\n");
+            return -1;
+        }
+        for (int i = 0; i < num_op; i++)
+        {
+            all_temps[i].op = kv_A(local_ptr_vec, i);
+            all_temps[i].prev_refcnt = 0;
+        }
+        old_num_op = num_op;
+        // fprintf(stderr, "first time appended %u nodes\n", num_op);
+    }
+    else if (kv_size(local_ptr_vec) > 0)
+    {
+        num_op = kv_size(local_ptr_vec);
+        unsigned int new_num_op = num_op + old_num_op;
+        OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
+        if (temp == NULL)
+        {
+            fprintf(stderr, "Failed to realloc\n");
+            free(all_temps);
+            return -1;
+        }
+        all_temps = temp;
+        for (int i = old_num_op; i < new_num_op; i++)
+        {
+            all_temps[i].op = kv_A(local_ptr_vec, i - old_num_op);
+            all_temps[i].prev_refcnt = 0;
+        }
+        old_num_op = new_num_op;
+    }
+    fprintf(stderr, "newly appended: %u, total: %u, time: %.3f sec\n", num_op, old_num_op, (float)(clock() - t) / CLOCKS_PER_SEC);
+}
+static void do_slow_scan()
+{
+    fprintf(stderr, "entering slow scan\n");
+    pthread_mutex_lock(&mutex);
+    fprintf(stderr, "mutex locked in slow\n");
+    while (allow_slow != 1)
+    {
+        fprintf(stderr, "waiting slow to be signaled\n");
+        pthread_cond_wait(&cond_slow, &mutex); // wait for cond_slow to be signaled
+    }
+    allow_fast = 0;
+
+    // PyGILState_STATE gstate = PyGILState_Ensure();
+    // empty_global_heat_utlist();
+    // op_gc_table *cur_op_gc_table = op_gc_table_init(0); // for upper most layer container objs, freed immediately after this call
+    // gc_get_objects_impl_op_gc(-1, cur_op_gc_table);
+    // // start cascading
+    // op_gc_table_locked_table *cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table);
+    // op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
+    // op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
+    // uintptr_t foundInner;
+    // heat_node *elt;
+    // int utlist_count;
+    // for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
+    // {
+    //     foundInner = *op_gc_table_iterator_key(op_gc_it);
+    //     PyObject *container_op = (PyObject *)foundInner;
+    //     if (check_object_type(container_op) == 1)
+    //     {
+    //         continue;
+    //     }
+    //     Temperature *dummy_temp = malloc(sizeof(Temperature)); // TODO: considering pre-malloc a bunch of dummy_temp at once and assign here, but how much?
+    //     heat_node *each_node = malloc(sizeof(heat_node));
+    //     each_node->temp = dummy_temp;
+    //     each_node->op = container_op;
+    //     DL_APPEND(global_heat_utlist, each_node);
+    //     insert_into_set(foundInner);
+    //     update_recursive_utlist(container_op, &global_heat_utlist);
+    // }
+    kv_init(local_ptr_vec);
+    double cur_cascading_time = try_cascading_old(total_num_slow);
+    {
+        total_cur_cascading_time += cur_cascading_time;
+        total_num_slow++;
+    }
+    // PyGILState_Release(gstate);
+    gen_temps();
+    kv_destroy(local_ptr_vec);
+    // print and free
+    // DL_COUNT(global_heat_utlist, elt, utlist_count);
+    // fprintf(stderr, "# live objs: %d\n", utlist_count);
+    // op_gc_table_iterator_free(op_gc_end);
+    // op_gc_table_iterator_free(op_gc_it);
+    // op_gc_table_locked_table_free(cur_op_gc_locked_table);
+    // op_gc_table_free(cur_op_gc_table);
+
+    last_time = clock();
+    allow_fast = 1;                  // allow fast to start, if any
+    pthread_cond_signal(&cond_fast); // Signal fast scan, if any
+    pthread_mutex_unlock(&mutex);
+}
+
+static void try_trigger_slow_scan()
+{
+    // fprintf(stderr, "entering trigger slow scan...\n");
+    if (!enable_bk)
+        return;
+    clock_t cur_time = clock();
+    long time_elapsed = cur_time - last_time;
+    if (time_elapsed < get_live_time_thresh)
+    {
+        // fprintf(stderr, "not there yet...\n");
+        return;
+    }
+    fprintf(stderr, "trigger from call back\n");
+    do_slow_scan();
+}
+
+void remove_dead_container_op()
+{
+    if (!collected_container_op_set) // || !live_container_op_set
+        return;
+    khint_t k;
+    for (k = kh_begin(collected_container_op_set); k != kh_end(collected_container_op_set); ++k)
+    {
+        if (kh_exist(collected_container_op_set, k))
+        {
+            PyObject *key = kh_key(collected_container_op_set, k);
+            // if (kh_get(ptrset, live_container_op_set, key) != kh_end(live_container_op_set))
+            // {
+            //     kh_del(ptrset, live_container_op_set, k);
+            // }
+            // if (kh_get(ptrset, cur_survived_op_set, key) != kh_end(cur_survived_op_set))
+            // {
+            //     kh_del(ptrset, cur_survived_op_set, k);
+            // }
+            erase_from_global((uintptr_t)key);
+        }
+    }
+}
+
+// static void try_append_survived_set(PyObject *op, khash_t(ptrset) * survived_op_set)
+// static void try_append_survived_set(PyObject *op, klist_t(ptrlist) * survived_op_list)
+// {
+//     khint_t k = kh_get(ptrset, live_container_op_set, op);
+//     if (k == kh_end(live_container_op_set))
+//     {
+//         // return;
+//         *kl_pushp(ptrlist, survived_op_list) = op;
+//         // int ret;
+//         // kh_put(ptrset, survived_op_set, (uintptr_t)op, &ret);
+//     }
+// }
 
 static void add_to_survived_from_young(PyGC_Head *survived)
 {
@@ -2044,11 +2135,11 @@ gc_collect_main(PyThreadState *tstate, int generation,
     m += gc_list_size(&final_unreachable);
     /* delete (future) unreachable objs */
 
-    if (enable_bk && collected_container_op_set)
-    {
-        delete_garbage_with_adding_collected_op(tstate, gcstate, &final_unreachable, old); // add to collected_container_op_set internally
-    }
-    else
+    // if (enable_bk && collected_container_op_set)
+    // {
+    //     delete_garbage_with_adding_collected_op(tstate, gcstate, &final_unreachable, old); // add to collected_container_op_set internally
+    // }
+    // else
     {
         delete_garbage(tstate, gcstate, &final_unreachable, old);
     }
@@ -2183,7 +2274,7 @@ invoke_gc_callback(PyThreadState *tstate, const char *phase,
     Py_DECREF(phase_obj);
     Py_XDECREF(info);
     assert(!_PyErr_Occurred(tstate));
-    // try_trigger_slow_scan();
+    try_trigger_slow_scan();
 }
 
 /* Perform garbage collection of a generation and invoke
@@ -2511,16 +2602,18 @@ referentsvisit(PyObject *obj, PyObject *list)
     // fprintf(stderr, "\t from inner\n");
     return PyList_Append(list, obj) < 0;
 }
-// static int cascadingvisitor(PyObject *inner_op, int *depth)
+
 static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 {
-    // if (found_in_kset(inner_op))
     if (check_in_global((uintptr_t)inner_op))
+    // if (check_in_set((uintptr_t)inner_op))
+    // if (found_in_kset(inner_op))
+    // if (found_in_local_kset(inner_op))
     {
         return 0;
     }
 
-    // *combined += 1; // increase length
+    // *combined += 1; // increase length, stop while traversing
     // unsigned int extracted_len = *combined & 0xFFFF;
     // if (extracted_len > LEN_THRESHOLD)
     // {
@@ -2530,9 +2623,12 @@ static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 
     // int ret;
     // kh_put(ptrset, global_op_set, inner_op, &ret);
+    // kh_put(ptrset, cur_survived_op_set, inner_op, &ret);
     // insert_into_set((uintptr_t)inner_op);
     insert_into_global((uintptr_t)inner_op);
     // global_dummy++;
+    // *kl_pushp(ptrlist, survived_op_list) = inner_op;
+    kv_push(PyObject *, local_ptr_vec, inner_op); // vector, dynamic resizing
     // inner_traversing(inner_op, combined); // for testing gc.get_referents()
     update_recursive_visitor(inner_op, combined); // for real
     return 0;
@@ -2637,12 +2733,9 @@ gc_get_referents(PyObject *self, PyObject *args)
         inner_traversing(obj, &combined);
         // unsigned int new_depth = (*combined >> 16) & 0xffff;
         // fprintf(stderr, "cur_depth: %d\n", cur_depth);
-        // k_dp = kh_put(ptr2int, op_depth_map, container_casted, &ret);
-        // if (ret > 0)
-        //     kh_value(op_depth_map, k_dp) = cur_depth;
     }
-    unsigned int global_op_size = kh_size(global_op_set);
-    fprintf(stderr, "global live op size: %u\n", global_op_size);
+    // unsigned int global_op_size = kh_size(global_op_set);
+    // fprintf(stderr, "global live op size: %u\n", global_op_size);
 
     return result;
     // return NULL;
@@ -3571,14 +3664,6 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     {
         return;
     }
-    // {
-    //     khint_t k_dp;
-    //     unsigned long cur_len = Py_SIZE(each_op);
-    //     unsigned long cur_len = _PySys_GetSizeOf(each_op);
-    //     k_dp = kh_put(ptr2int, op_depth_map, (uintptr_t)each_op, &ret); // add to op_depth map
-    //     if (ret > 0)
-    //         kh_value(op_depth_map, k_dp) = cur_len;
-    // }
 
     PyTypeObject *t = Py_TYPE(each_op);
     if (!t->tp_iter || !t->tp_repr)
@@ -3589,11 +3674,11 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
-    { // skip large length objs
-      // unsigned long cur_len = Py_SIZE(each_op); // || cur_len > 10000000
-      // if (cur_len > LEN_THRESHOLD)
-      //     return;
-    }
+    // {                                             // skip before traversing
+    //     unsigned long cur_len = Py_SIZE(each_op); // || cur_len > 10000000
+    //     if (cur_len > LEN_THRESHOLD)
+    //         return;
+    // }
 
     unsigned int last_length = *combined & 0xFFFF;
     *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
@@ -3601,20 +3686,12 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     // {                        // skip large depth objs
     //     unsigned int extractedDepth = (*combined >> 16);
     //     if (extractedDepth > DEPTH_THRESHOLD)
+    //     {
     //         return;
+    //     }
     // }
     traverse(each_op, (visitproc)cascadingvisitor, combined);
     *combined = (*combined & 0xFFFF0000) | last_length;
-    // calculate length
-    // if (length > 0)
-    // {
-    //     int ret;
-    //     khint_t k_dp = kh_put(ptr2int, op_depth_map, (uintptr_t)each_op, &ret);
-    //     if (ret > 0)
-    //     {
-    //         kh_value(op_depth_map, k_dp) = length;
-    //     }
-    // }
 }
 
 static int append_objects_op_gc(PyGC_Head *gc_list, op_gc_table *table)
@@ -5376,12 +5453,24 @@ void append_to_heat_node_flexibel_free(heat_node **starting_node)
 
 bool found_in_kset(PyObject *op)
 {
-    khint_t k = kh_get(ptrset, global_op_set, op);
-    if (k == kh_end(global_op_set))
-    {
-        return false; // not found
-    }
-    return true; // found
+    // khint_t k = kh_get(ptrset, global_op_set, op);
+    // if (k == kh_end(global_op_set))
+    // {
+    //     return false; // not found
+    // }
+    // return true; // found
+    return kh_get(ptrset, global_op_set, op) != kh_end(global_op_set);
+}
+
+bool found_in_local_kset(PyObject *op)
+{
+    // khint_t k = kh_get(ptrset, cur_survived_op_set, op);
+    // if (k == kh_end(cur_survived_op_set))
+    // {
+    //     return false; // not found
+    // }
+    // return true; // found
+    return kh_get(ptrset, cur_survived_op_set, op) != kh_end(cur_survived_op_set);
 }
 
 void *use_utlist(void *arg)
@@ -5435,10 +5524,10 @@ void *use_utlist(void *arg)
             heat_node *elt;
             // clock_t start_utlist = clock();
             // end utlist
-            int ret = 0, ret_depth = 0;
+            int ret = 0;
             khint_t k;
             h = kh_init(ptrset);
-            op_depth_map = kh_init(ptr2int);
+            // op_depth_map = kh_init(ptr2int);
             for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
             {
                 // Temperature dummy_temp = {
@@ -5478,9 +5567,9 @@ void *use_utlist(void *arg)
                 // update_recursive_utlist(container_op, &heat_node_head);
                 unsigned int cur_depth = 0;
                 update_recursive_visitor(container_op, &cur_depth);
-                k = kh_put(ptr2int, op_depth_map, foundInner, &ret); // add to op_depth map
-                if (ret > 0)
-                    kh_value(op_depth_map, k) = cur_depth;
+                // k = kh_put(ptr2int, op_depth_map, foundInner, &ret); // add to op_depth map
+                // if (ret > 0)
+                //     kh_value(op_depth_map, k) = cur_depth;
                 // fprintf(stderr, "depth: %d\n", cur_depth);
             }
             // int map_size = kh_size(op_depth_map);
@@ -5634,7 +5723,7 @@ void *use_utlist(void *arg)
             cur_scan_idx = 0;
             op_gc_table_free(changed_op);
             kh_destroy(ptrset, h);
-            kh_destroy(ptr2int, op_depth_map);
+            // kh_destroy(ptr2int, op_depth_map);
             // heat_node *node_ptr, *tmp;
             // DL_FOREACH_SAFE(heat_node_head, node_ptr, tmp)
             // { // uncomment this to free each utlist
@@ -5816,91 +5905,92 @@ void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundary
 
 static void calculate_merge(int num_objs)
 {
-    if (PyGILState_Check())
+    if (PyGILState_Check() || old_num_op == 0)
     {
         fprintf(stderr, "GIL held by slow, try merging later\n");
         usleep(250000); // 0.25s
         return;
     }
-    heat_node *node_ptr;
+    // heat_node *node_ptr;
     PyObj_range *pyobj_ranges = malloc(num_objs * sizeof(PyObj_range));
     int i = 0;
     // TODO: sanity check, make sure cur_sizeof is positive
-    DL_FOREACH(global_heat_utlist, node_ptr)
+    // DL_FOREACH(global_heat_utlist, node_ptr)
+    for (int i = 0; i < num_objs; i++)
     {
-        uintptr_t addr_start = (uintptr_t)(node_ptr->op);
-        uintptr_t addr_end = (uintptr_t)(node_ptr->temp->cur_sizeof) + addr_start;
-        pyobj_ranges[i].start = addr_start;
-        pyobj_ranges[i].end = addr_end;
-        i += 1;
+        pyobj_ranges[i].start = (uintptr_t)all_temps[i].op;
+        pyobj_ranges[i].end = (uintptr_t)(all_temps[i].cur_sizeof) + pyobj_ranges[i].start;
     }
-    int range_size = num_objs;
-    // fprintf(stderr, "Before merge size: %d\n", range_size);
+    fprintf(stderr, "pyobj_ranges size: %d\n", num_objs);
+    // int range_size = num_objs;
+    // // fprintf(stderr, "Before merge size: %d\n", range_size);
 
-    mergeIntervals(&pyobj_ranges, &range_size); // this contains bug
-    // fprintf(stderr, "After merge/align page size: %d\n", range_size);
-    // fprintf(stderr, "intervals outside: %p\n", pyobj_ranges);
+    // mergeIntervals(&pyobj_ranges, &range_size); // this contains bug
+    // // fprintf(stderr, "After merge/align page size: %d\n", range_size);
+    // // fprintf(stderr, "intervals outside: %p\n", pyobj_ranges);
 
-    // for (int i = 0; i < range_size; i++)
+    // // for (int i = 0; i < range_size; i++)
+    // // {
+    // //     fprintf(stderr, "(%ld, %ld)\n", pyobj_ranges[i].start, pyobj_ranges[i].end);
+    // // }
+
+    // int num_pages = 0;
+    // void **pages = getPageBoundaries(pyobj_ranges, range_size, &num_pages);
+    // fprintf(stderr, "num_pages: %d\n", num_pages);
+    // for (int i = 0; i < num_pages; i++)
     // {
-    //     fprintf(stderr, "(%ld, %ld)\n", pyobj_ranges[i].start, pyobj_ranges[i].end);
+    //     if ((uintptr_t)(pages[i]) % PAGE_SIZE != 0)
+    //     {
+    //         fprintf(stderr, "not aligned %ld\n", pages[i]);
+    //     }
     // }
 
-    int num_pages = 0;
-    void **pages = getPageBoundaries(pyobj_ranges, range_size, &num_pages);
-    fprintf(stderr, "num_pages: %d\n", num_pages);
-    for (int i = 0; i < num_pages; i++)
-    {
-        if ((uintptr_t)(pages[i]) % PAGE_SIZE != 0)
-        {
-            fprintf(stderr, "not aligned %ld\n", pages[i]);
-        }
-    }
-
-    int *nodes = malloc(num_pages * sizeof(int));
-    int *status = malloc(num_pages * sizeof(int));
-    for (int i = 0; i < num_pages; i++)
-    {
-        nodes[i] = 1;
-    }
-    long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
-    for (int i = 0; i < num_pages; ++i)
-    {
-        if (status[i] < 0)
-        {
-            fprintf(stderr, "Page %lu not moved: %d\n", i, status[i]);
-        }
-    }
+    // int *nodes = malloc(num_pages * sizeof(int));
+    // int *status = malloc(num_pages * sizeof(int));
+    // for (int i = 0; i < num_pages; i++)
+    // {
+    //     nodes[i] = 1;
+    // }
+    // long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
+    // for (int i = 0; i < num_pages; ++i)
+    // {
+    //     if (status[i] < 0)
+    //     {
+    //         fprintf(stderr, "Page %lu not moved: %d\n", i, status[i]);
+    //     }
+    // }
     free(pyobj_ranges);
-    free(pages);
-    free(nodes);
-    free(status);
+    // free(pages);
+    // free(nodes);
+    // free(status);
 }
 
 void *manual_trigger_scan(void *arg)
 {
-    pthread_mutex_init(&mutex, NULL);
-    pthread_cond_init(&cond_slow, NULL);
-    pthread_cond_init(&cond_fast, NULL);
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+    pthread_mutex_init(&mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+    // pthread_mutex_init(&mutex, NULL);
+    // pthread_cond_init(&cond_slow, NULL);
+    // pthread_cond_init(&cond_fast, NULL);
 
     enable_bk = true;
-    BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-    if (!bookkeep_args->live_time_thresh_arg)
+    global_bookkeep_args = (BookkeepArgs *)arg;
+    if (!global_bookkeep_args->live_time_thresh_arg)
     {
-        get_live_time_thresh = 2500000; // default: 2.5s
+        get_live_time_thresh = 3500000; // default: 2.5s
     }
     else
     {
-        get_live_time_thresh = bookkeep_args->live_time_thresh_arg;
+        get_live_time_thresh = global_bookkeep_args->live_time_thresh_arg;
     }
     allow_slow = 1;
+    fprintf(stderr, "trigger from manual\n");
     do_slow_scan(); // enforce one-time slow scan
-    int rescan_thresh = bookkeep_args->rescan_thresh;
-    unsigned int doIO_ = bookkeep_args->doIO;
-    // PyGILState_STATE gstate;
-    // int rescan_thresh = bookkeep_args->rescan_thresh;
-    // then do fast scans
-    // TODO: need to maintain a lock/signal to inform when to start/stop slow scan, during fast cycles
+    int rescan_thresh = global_bookkeep_args->rescan_thresh;
+    unsigned int doIO_ = global_bookkeep_args->doIO;
     int total_fast_num = 0;
     Temperature *temp_ptr;
     heat_node *node_ptr, *tmp;
@@ -5915,8 +6005,118 @@ void *manual_trigger_scan(void *arg)
     clock_t cur_fast_start, cur_fast_end;
     all_heats_table *allHeats = all_heats_table_init(0);
     all_heats_table_locked_table *allHeats_locked = NULL;
-
     while (!terminate_flag_refchain)
+    {
+        pthread_mutex_lock(&mutex);
+        while (allow_fast != 1)
+        {
+            fprintf(stderr, "waiting fast to be signaled\n");
+            pthread_cond_wait(&cond_fast, &mutex); // wait for cond_fast to be signaled
+        }
+        allow_slow = 0;
+        // total_fast_num++;
+        cur_fast_start = clock();
+        // do fast in here
+        if (fast_scan_idx == 0)
+        { // first fast cycle, record the prev_count
+            for (int i = 0; i < old_num_op; i++)
+            {
+                all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+            }
+        }
+        else if (fast_scan_idx == 1)
+        {
+            for (int i = 0; i < old_num_op; i++)
+            {
+                all_temps[i].diffs[0] = abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt); // note here we start from index 0, and get abs value
+                if (all_temps[i].diffs[0] != 0)
+                {
+                    foundInner = (uintptr_t)all_temps[i].op;
+                    if (foundInner > prev_changed_max)
+                    {
+                        prev_changed_max = foundInner;
+                    }
+                    else if (foundInner < prev_changed_min && foundInner > no_93_upper)
+                    {
+                        prev_changed_min = foundInner;
+                    }
+                }
+                all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+            }
+        }
+        else if (fast_scan_idx == 2)
+        {
+            for (int i = 0; i < old_num_op; i++)
+            {
+                foundInner = (uintptr_t)all_temps[i].op;
+                if (foundInner > prev_changed_min && foundInner < prev_changed_max)
+                {
+                    all_temps[i].diffs[1] = abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
+                    all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                }
+                else
+                {
+                    all_temps[i].diffs[1] = 0;
+                }
+            }
+        }
+        else
+        {
+            for (int i = 0; i < old_num_op; i++)
+            {
+                // foundInner = (uintptr_t)all_temps[i].op;
+                if (all_temps[i].diffs[1] != 0)
+                {
+                    all_temps[i].diffs[fast_scan_idx - 1] = abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
+                    all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                    if (all_temps[i].diffs[fast_scan_idx - 1] == 0) // diff == 0, mark as unhot / dead
+                    {
+                        all_temps[i].diffs[1] = 0;
+                    }
+                }
+            }
+        }
+        cur_fast_end = clock();
+
+        double cur_fast_time = ((double)(cur_fast_end - cur_fast_start)) / CLOCKS_PER_SEC;
+        fprintf(stderr, "fast %d, # all: %d, cur_fast_time: %.3f\n", fast_scan_idx, utlist_count, cur_fast_time);
+        if (++fast_scan_idx == rescan_thresh)
+        {
+            fast_scan_idx = 0;
+            fprintf(stderr, "a bunch of fasts finished, gather info...\n");
+
+            clock_t start_get_sizeof = clock();
+            if (PyGILState_Check())
+            {
+                fprintf(stderr, "GIL is held\n");
+            }
+            else
+            {
+                fprintf(stderr, "GIL not held\n");
+            }
+            PyGILState_STATE gstate = PyGILState_Ensure();
+            fprintf(stderr, "GIL acquired\n");
+            // for (int i = 0; i < old_num_op; i++)
+            // {
+            //     if (all_temps[i].diffs[1] != 0)
+            //     {
+            //         PyObject *op = all_temps[i].op;
+            //         all_temps[i].cur_sizeof = _PySys_GetSizeOf(op);
+            //     }
+            // }
+            PyGILState_Release(gstate);
+            fprintf(stderr, "get sizeof time: %.3f seconds\n", (float)(clock() - start_get_sizeof) / CLOCKS_PER_SEC);
+
+            // clock_t merge_start = clock();
+            // calculate_merge(old_num_op);
+            // fprintf(stderr, "merge time: %.3f\n", (double)(clock() - merge_start) / CLOCKS_PER_SEC);
+        }
+        allow_slow = 1;
+        pthread_cond_signal(&cond_slow); // Signal fast scan, if any
+        pthread_mutex_unlock(&mutex);
+        usleep(global_bookkeep_args->sample_dur);
+    }
+    while (0)
     {
         // while (PyGILState_Check())
         // {
@@ -6065,6 +6265,7 @@ void *manual_trigger_scan(void *arg)
     }
     terminate_flag_refchain = 0;
     enable_bk = false;
+    fprintf(stderr, "total_num_slow: %d, total_cur_cascading_time: %.3f\n", total_num_slow, total_cur_cascading_time);
     pthread_mutex_destroy(&mutex);
     pthread_cond_destroy(&cond_slow);
     pthread_cond_destroy(&cond_fast);
@@ -6073,8 +6274,8 @@ void *manual_trigger_scan(void *arg)
 void *inspect_survived_objs(void *arg)
 {
     enable_bk = true;
-    live_container_op_set = kh_init(ptrset);
-    collected_container_op_set = kh_init(ptrset);
+    // live_container_op_set = kh_init(ptrset);
+    // collected_container_op_set = kh_init(ptrset);
 
     // BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
     global_bookkeep_args = (BookkeepArgs *)arg;
@@ -6087,7 +6288,6 @@ void *inspect_survived_objs(void *arg)
     //     get_live_time_thresh = bookkeep_args->live_time_thresh_arg;
     // }
     // allow_slow = 1;
-    // do_slow_scan(); // enforce one-time slow scan
     // int rescan_thresh = bookkeep_args->rescan_thresh;
     // unsigned int doIO_ = bookkeep_args->doIO;
     // // PyGILState_STATE gstate;
@@ -6108,11 +6308,10 @@ void *inspect_survived_objs(void *arg)
     // clock_t cur_fast_start, cur_fast_end;
     // all_heats_table *allHeats = all_heats_table_init(0);
     // all_heats_table_locked_table *allHeats_locked = NULL;
-    int total_num_slow = 0;
-    double total_cur_cascading_time = 0.0;
     ts_blob outter_key_wrapper;
     all_heats_table *allHeats = all_heats_table_init(0);
     struct timespec ts;
+    // survived_op_list = kl_init(ptrlist);
     while (!terminate_flag_refchain)
     {
         if (gen_idx != 1)
@@ -6120,68 +6319,34 @@ void *inspect_survived_objs(void *arg)
             usleep(100000); // 0.1s
             continue;
         }
-        PyGILState_STATE gstate = PyGILState_Ensure();
-        khash_t(ptrset) *survived_op_set = kh_init(ptrset);
+        // PyGILState_STATE gstate = PyGILState_Ensure();
+        kv_init(local_ptr_vec);
         // cur_survived_op_set = kh_init(ptrset);
-        klist_t(ptrlist) *survived_op_list = kl_init(ptrlist);
-        double cur_cascading_time = try_cascading_old(survived_op_list, survived_op_set, total_num_slow);
-        PyGILState_Release(gstate);
+        double cur_cascading_time = try_cascading_old(total_num_slow);
+        // PyGILState_Release(gstate);
         // if (gen_idx == 2)
         {
             total_cur_cascading_time += cur_cascading_time;
             total_num_slow++;
         }
+        // malloc temperatur metadata
+        gen_temps();
 
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        outter_key_wrapper.cur_slow_idx = 0;
-        outter_key_wrapper.ts = ts;
-        uintptr_t casted_survived_set = (uintptr_t)survived_op_set;
-        all_heats_table_insert(allHeats, &outter_key_wrapper, &casted_survived_set);
-        kh_destroy(ptrset, survived_op_set);
-        kl_destroy(ptrlist, survived_op_list);
+        // clock_gettime(CLOCK_MONOTONIC, &ts);
+        // outter_key_wrapper.cur_slow_idx = 0;
+        // outter_key_wrapper.ts = ts;
+        // kh_destroy(ptrset, cur_survived_op_set);
         usleep(global_bookkeep_args->sample_dur);
+        kv_destroy(local_ptr_vec);
     }
     // if (global_bookkeep_args->doIO)
-    if (0)
-    {
-        fprintf(stderr, "doing IO...\n");
-        fflush(stderr);
-        uintptr_t found_each_cur_heats;
-        all_heats_table_iterator *allHeats_it, *allHeats_end;
-        all_heats_table_locked_table *allHeats_locked = all_heats_table_lock_table(allHeats);
-        allHeats_it = all_heats_table_locked_table_begin(allHeats_locked);
-        allHeats_end = all_heats_table_locked_table_end(allHeats_locked);
-        clock_t IO_start = clock();
-        for (; !all_heats_table_iterator_equal(allHeats_it, allHeats_end); all_heats_table_iterator_increment(allHeats_it))
-        {
-            outter_key_wrapper = *all_heats_table_iterator_key(allHeats_it);
-            found_each_cur_heats = *all_heats_table_iterator_mapped(allHeats_it);
-            khash_t(ptrset) *survived_op_set = (khash_t(ptrset) *)found_each_cur_heats;
-            // fprintf(stderr, "survived_op_set: %ld\n", (uintptr_t)survived_op_set);
-            // stream to file
-            khint_t k;
-            for (k = kh_begin(survived_op_set); k != kh_end(survived_op_set); ++k)
-            {
-                if (kh_exist(survived_op_set, k))
-                {
-                    uintptr_t container_casted = kh_key(survived_op_set, k);
-                    fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld\n", outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec, container_casted);
-                }
-            }
-            kh_destroy(ptrset, survived_op_set); // remember to free this regardless
-        }
-        all_heats_table_iterator_free(allHeats_it);
-        all_heats_table_iterator_free(allHeats_end);
-        all_heats_table_locked_table_free(allHeats_locked);
-        clock_t IO_end = clock();
-        double whole_IO_time = (double)(IO_end - IO_start) / CLOCKS_PER_SEC;
-        fprintf(stderr, "flushing time: %.3f seconds\n", whole_IO_time);
-    }
-    all_heats_table_free(allHeats);
-    free_set();
     fprintf(stderr, "total_num_slow: %d, total_cur_cascading_time: %.3f\n", total_num_slow, total_cur_cascading_time);
-    kh_destroy(ptrset, collected_container_op_set);
-    kh_destroy(ptrset, live_container_op_set);
+
+    // free_set();
+    // kl_destroy(ptrlist, survived_op_list);
+    // kh_destroy(ptrset, collected_container_op_set);
+    // kh_destroy(ptrset, live_container_op_set);
     terminate_flag_refchain = 0;
     enable_bk = false;
+    // free_global(); // TODO: need to move to other place
 }

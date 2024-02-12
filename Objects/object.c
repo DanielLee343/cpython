@@ -2214,7 +2214,7 @@ extern "C"
             init_refchain(interp);
         }
 #endif
-        init_global_op_set();
+        // init_global_op_set();
     }
 
     extern PyTypeObject _Py_GenericAliasIterType;
@@ -2859,7 +2859,7 @@ extern "C"
         _Py_ForgetReference(op);
 #endif
         (*dealloc)(op);
-        delete_from_global_op_set(op);
+        // delete_from_global_op_set(op);
         erase_from_global((uintptr_t)op);
 
 #ifdef Py_DEBUG

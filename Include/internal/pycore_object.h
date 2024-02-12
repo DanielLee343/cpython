@@ -32,6 +32,11 @@ KHASH_SET_INIT_INT32(ptrset)
 #error "Unsupported pointer size"
 #endif
 
+#include "klist.h"
+#define __int_free(x)
+    KLIST_INIT(ptrlist, PyObject *, __int_free)
+#include "kvec.h"
+
 #define _PyObject_HEAD_INIT(type)             \
     {                                         \
         _PyObject_EXTRA_INIT                  \
