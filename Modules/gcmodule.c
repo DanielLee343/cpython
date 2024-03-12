@@ -58,6 +58,7 @@ pthread_cond_t cond_slow = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_fast = PTHREAD_COND_INITIALIZER;
 static double total_cur_cascading_time = 0.0;
 static int total_num_slow = 0;
+unsigned int prev_global_set_size = 0;
 
 khash_t(ptrset) * h;                          // for use_utlist
 khash_t(ptrset) * live_container_op_set;      // contains all live container objs (including newly survived)
@@ -84,6 +85,7 @@ unsigned long migration_time_thresh;
 #define LEN_THRESHOLD 0
 #define DEPTH_THRESHOLD 100
 #define LOWER_BOUND 100000000000000
+#define RESET_MD_DEC_THRESH -100000
 uintptr_t global_dummy;
 typedef struct heat_node
 {
@@ -105,6 +107,7 @@ typedef struct GEN_ID_BOUND
     int gen_id;
     uintptr_t low;
     uintptr_t high;
+    uintptr_t head;
 } GEN_ID_BOUND;
 
 GEN_ID_BOUND gen_id_bound[NUM_GENERATIONS];
@@ -119,7 +122,6 @@ typedef struct cur_survived_node
 int allow_fast = 0;
 int allow_slow = 0;
 PyGC_Head *global_old;
-PyGC_Head *global_old_last;
 static int gen_idx = -1;
 
 int cmp_func(heat_node *a, heat_node *b)
@@ -285,6 +287,7 @@ _PyGC_Init(PyInterpreterState *interp)
         gen_id_bound[i].gen_id = i;
         gen_id_bound[i].low = UINTPTR_MAX;
         gen_id_bound[i].high = 0;
+        gen_id_bound[i].head = 0;
     }
     GCState *gcstate = &interp->gc;
     global_dummy = 0;
@@ -1675,9 +1678,12 @@ int check_object_type(PyObject *obj)
 }
 static double try_cascading_old(int slow_idx)
 {
-    PyGILState_STATE gstate = PyGILState_Ensure();
     if (!enable_bk || !global_old || gen_idx == -1)
+    {
+        fprintf(stderr, "returned\n");
         return;
+    }
+    PyGILState_STATE gstate = PyGILState_Ensure();
     PyGC_Head *gc;
     PyObject *container_op;
     int ret;
@@ -1686,6 +1692,14 @@ static double try_cascading_old(int slow_idx)
     // op_depth_map = kh_init(ptr2int);
     uintptr_t local_lowest_op = UINTPTR_MAX;
     uintptr_t cur_gen_low_bound = gen_id_bound[gen_idx].low;
+    if (gen_id_bound[gen_idx].head == 0)
+    {
+        gen_id_bound[gen_idx].head = (uintptr_t)global_old;
+    }
+    else if (gen_id_bound[gen_idx].head != (uintptr_t)global_old)
+    {
+        fprintf(stderr, "head changed! not cool!\n");
+    }
     // struct timespec ts;
     // clock_gettime(CLOCK_MONOTONIC, &ts);
     // append to survived_op_set
@@ -1714,11 +1728,10 @@ static double try_cascading_old(int slow_idx)
             // count++;
         }
         gen_id_bound[gen_idx].low = local_lowest_op;
-        fprintf(stderr, "glb_lowest_op: %lu\n", gen_id_bound[gen_idx].low);
     }
-    // if (0) // directly insert to global set
     {
-        for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
+        PyGC_Head *cur_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head; // by default, always 2
+        for (gc = GC_NEXT(cur_gen_head); gc != cur_gen_head; gc = GC_NEXT(gc))
         {
             container_op = FROM_GC(gc);
             uintptr_t casted_op = (uintptr_t)container_op;
@@ -1748,7 +1761,6 @@ static double try_cascading_old(int slow_idx)
         }
         gen_id_bound[gen_idx].low = local_lowest_op;
     }
-    // fprintf(stderr, "global_old_last: %ld\n", (uintptr_t)global_old_last); // not informative
     // now, delete the collected objs
     // remove_dead_container_op(); // TODO: double check if necessary
     clock_t finish_container_traverse = clock();
@@ -1851,8 +1863,69 @@ void gen_temps()
 {
     clock_t t;
     t = clock();
+    unsigned int num_op = 0;
+    // if (all_temps)
+    //     free(all_temps);
+    unsigned int cur_global_set_size = get_global_size();
+    int diff_global_size = (int)cur_global_set_size - (int)prev_global_set_size;
+    if (diff_global_size < RESET_MD_DEC_THRESH) // logic: if the global set size decreased too much --> A LOT obj is GC-ed --> reset metadata
+    {
+        fprintf(stderr, "Time to reset metadata!\n");
+    }
+    prev_global_set_size = cur_global_set_size;
+    if ((!all_temps && kv_size(local_ptr_vec) > 0) || diff_global_size < RESET_MD_DEC_THRESH)
+    {
+        // first time / reset metadata --> malloc
+        free(all_temps);
+        num_op = kv_size(local_ptr_vec);
+        all_temps = (OBJ_TEMP *)malloc(num_op * sizeof(OBJ_TEMP));
+        if (all_temps == NULL)
+        {
+            fprintf(stderr, "Failed to allocate memory for all ops\n");
+            return -1;
+        }
+        for (int i = 0; i < num_op; i++)
+        {
+            all_temps[i].op = kv_A(local_ptr_vec, i);
+            all_temps[i].prev_refcnt = 0;
+            // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
+        }
+        old_num_op = num_op;
+        fprintf(stderr, "first time appended %u nodes\n", num_op);
+    }
+    else if (kv_size(local_ptr_vec) > 0)
+    {
+        // not first time --> realloc
+        num_op = kv_size(local_ptr_vec);
+        unsigned int new_num_op = num_op + old_num_op;
+        OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
+        if (temp == NULL)
+        {
+            fprintf(stderr, "Failed to realloc\n");
+            free(all_temps);
+            return -1;
+        }
+        all_temps = temp;
+        for (int i = old_num_op; i < new_num_op; i++)
+        {
+            all_temps[i].op = kv_A(local_ptr_vec, i - old_num_op);
+            all_temps[i].prev_refcnt = 0;
+            // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
+        }
+        old_num_op = new_num_op;
+        fprintf(stderr, "newly appended: %u, total: %u\n", num_op, old_num_op);
+    }
+    fprintf(stderr, "forming all_temp time: %.3f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
+}
+
+void gen_temps_refchain()
+{
+    clock_t t;
+    t = clock();
     unsigned int num_op;
-    if (!all_temps && kv_size(local_ptr_vec) > 0)
+    if (all_temps)
+        free(all_temps);
+    if (kv_size(local_ptr_vec) > 0)
     {
         // first time --> malloc
         num_op = kv_size(local_ptr_vec);
@@ -1870,26 +1943,7 @@ void gen_temps()
         old_num_op = num_op;
         // fprintf(stderr, "first time appended %u nodes\n", num_op);
     }
-    else if (kv_size(local_ptr_vec) > 0)
-    {
-        num_op = kv_size(local_ptr_vec);
-        unsigned int new_num_op = num_op + old_num_op;
-        OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
-        if (temp == NULL)
-        {
-            fprintf(stderr, "Failed to realloc\n");
-            free(all_temps);
-            return -1;
-        }
-        all_temps = temp;
-        for (int i = old_num_op; i < new_num_op; i++)
-        {
-            all_temps[i].op = kv_A(local_ptr_vec, i - old_num_op);
-            all_temps[i].prev_refcnt = 0;
-        }
-        old_num_op = new_num_op;
-    }
-    fprintf(stderr, "newly appended: %u, total: %u, time: %.3f sec\n", num_op, old_num_op, (float)(clock() - t) / CLOCKS_PER_SEC);
+    fprintf(stderr, "total: %u, forming all_temp time: %.3f sec\n", old_num_op, (float)(clock() - t) / CLOCKS_PER_SEC);
 }
 static void do_slow_scan()
 {
@@ -1936,6 +1990,28 @@ static void do_slow_scan()
         total_cur_cascading_time += cur_cascading_time;
         total_num_slow++;
     }
+    if (0)
+    {
+        if (global_bookkeep_args->doIO)
+        {
+            fprintf(stderr, "flushing...\n");
+            PyGILState_STATE gstate = PyGILState_Ensure();
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            print_global_addr(global_bookkeep_args->fd, total_num_slow);
+            // unsigned int cur_local_size = kv_size(local_ptr_vec);
+            // for (int i = 0; i < cur_local_size; i++)
+            // {
+            //     // uintptr_t found_inner = (uintptr_t)all_temps[i].op;
+            //     // uintptr_t found_inner = (uintptr_t)kv_A(local_ptr_vec, i);
+            //     fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
+            //     fprintf(global_bookkeep_args->fd, "\n");
+            // }
+            PyGILState_Release(gstate);
+            fflush(global_bookkeep_args->fd);
+        }
+        // print live objs
+    }
     // PyGILState_Release(gstate);
     gen_temps();
     kv_destroy(local_ptr_vec);
@@ -1971,7 +2047,6 @@ static bool try_trigger_slow_scan()
     //     // fprintf(stderr, "not there yet...\n");
     //     return false;
     // }
-    fprintf(stderr, "trigger from call back\n");
     do_slow_scan();
     return true;
 }
@@ -2183,7 +2258,6 @@ gc_collect_main(PyThreadState *tstate, int generation,
     handle_legacy_finalizers(tstate, gcstate, &finalizers, old);
     validate_list(old, collecting_clear_unreachable_clear);
     global_old = old;
-    global_old_last = GC_PREV(old);
     gen_idx = generation;
 
     /* Clear free list only during the collection of the highest
@@ -3806,6 +3880,46 @@ error:
     return;
 }
 
+void record_temp(int scan_idx, int rescan_thresh)
+{
+    // return;
+    // PyGILState_STATE gstate = PyGILState_Ensure();
+    unsigned int skipped = 0;
+    for (int i = 0; i < old_num_op; i++)
+    {
+        // temp_diff = abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
+        // if (temp_diff > SHRT_MAX)
+        // {
+        //     all_temps[i].diffs[0] = 0; // unhot / mild hot
+        // }
+        // else
+        // {
+        //     all_temps[i].diffs[0] = (short)temp_diff;
+        // }
+        // or in a compact way:
+        // if (all_temps[i].diffs[rescan_thresh - 1] != 0)
+        // if (!check_in_collected(all_temps[i].op))
+        // if (all_temps[i].op->hotness == 0)
+        //     continue; // dead, continue
+        // if (all_temps[i].diffs[rescan_thresh - 1] == 0)
+        // {
+        //     skipped++;
+        //     continue; // cold, continue
+        // }
+        {
+            all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
+            // all_temps[i].diffs[scan_idx] = (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
+            all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+        }
+        // else
+        // {
+        // cold, do something?
+        // }
+    }
+    // fprintf(stderr, "skipped %u objs\n", skipped);
+    // PyGILState_Release(gstate);
+}
+
 void update_prev_refcnt_slow_trace(cur_heats_table_locked_table *curHeats_locked, cur_heats_table *curHeats)
 {
     cur_heats_table_iterator *curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
@@ -4621,163 +4735,133 @@ void *thread_trace_from_gc_list(void *arg)
 extern volatile short terminate_flag_refchain;
 #ifdef Py_TRACE_REFS
 
-void *compare_gc_refchain(void *arg)
+static inline void refchain_2_kv_vec(PyInterpreterState *interp)
 {
-    // fprintf(stderr, "start bookkeep thread\n");
-    // BookkeepArgs *bookkeep_args = (BookkeepArgs *)arg;
-    // if (bookkeep_args->fd == NULL)
-    // {
-    //     perror("Failed to find fd passed in\n");
-    // }
-    // PyGILState_STATE gstate;
-    // all_heats_table *allHeats = all_heats_table_init(0);
-    // all_heats_table_locked_table *allHeats_locked = NULL;
-    // ts_blob outter_key_wrapper;
-    // cur_heats_table *curHeats_refchain, *curHeats_gc_list = NULL;
-    // cur_heats_table_locked_table *curHeats_refchain_locked, *curHeats_gc_list_locked = NULL;
-    // unsigned int doIO_ = bookkeep_args->doIO;
-    // int cur_scan_idx = 0; // indicates how many fast scan bk thread has done, resets to zero when reaching rescan_thresh
-    // int cur_slow_idx = 0;
-    // struct timespec ts;
-    // clock_t update_prev_refcnt_start, update_prev_refcnt_end, insert_record_start, insert_record_end, IO_start, IO_end;
-    // double update_prev_refcnt_time = 0.0, total_hold_GIL_time = 0.0, insert_record_time = 0.0, whole_IO_time = 0.0, total_hold_fast_update_refcnt_time = 0.0, total_insert_record_time = 0.0;
-    // int total_fast_num = 0, total_slow_num = 0;
+    PyObject *refchain = &interp->object_state.refchain;
+    PyObject *op;
+    uintptr_t live_obj_count = 0;
+    clock_t start_refchain_vec = clock();
+    for (op = refchain->_ob_next; op != refchain; op = op->_ob_next)
+    {
+        // uintptr_t container_op = (uintptr_t)op;
+        kv_push(PyObject *, local_ptr_vec, op);
+        live_obj_count++;
+    }
+    double refchain_vec_time = (double)(clock() - start_refchain_vec) / CLOCKS_PER_SEC;
+    fprintf(stderr, "refchain_2_kv_vec time: %.3f\n", refchain_vec_time);
+}
+void *thread_trace_from_refchain(void *arg)
+{
+    global_bookkeep_args = (BookkeepArgs *)arg;
+    int fast_scan_idx = -1;
+    uintptr_t no_93_upper = 100000000000000;
+    int rescan_thresh = global_bookkeep_args->rescan_thresh;
+    unsigned int doIO_ = global_bookkeep_args->doIO;
+    bool first_ever_entering = true;
+    struct timespec ts;
+    clock_t cur_fast_start;
+    while (!terminate_flag_refchain)
+    {
+        if (fast_scan_idx == -1)
+        {
+            fprintf(stderr, "peeking refchain...\n");
+            kv_init(local_ptr_vec);
+            PyGILState_STATE gstate = PyGILState_Ensure();
+            PyThreadState *tstate = _PyThreadState_GET();
+            PyInterpreterState *interp = tstate->interp;
+            refchain_2_kv_vec(interp);
+            PyGILState_Release(gstate);
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            gen_temps_refchain();
+            // fprintf(stderr, "copied_size: %u\n", kv_size(local_ptr_vec));
+            kv_destroy(local_ptr_vec);
 
-    // clock_t start_GC_list, end_GC_list;
-    // double time_GC_list = 0.0, total_time_GC_List = 0.0;
-    // int rescan_thresh = bookkeep_args->rescan_thresh;
-    // if (rescan_thresh == 0)
-    // {
-    //     perror("rescan_thresh cannot be 0\n");
-    //     return NULL;
-    // }
-    // uintptr_t prev_changed_max = 0;
-    // uintptr_t prev_changed_min = ULONG_MAX;
-    // uintptr_t no_93_upper = 100000000000000;
-
-    // while (!terminate_flag_refchain)
-    // {
-    //     if (cur_scan_idx == 0)
-    //     {
-    //         fprintf(stderr, "peeking refchain...\n");
-    //         clock_gettime(CLOCK_MONOTONIC, &ts);
-    //         outter_key_wrapper.ts = ts;
-    //         curHeats_refchain = cur_heats_table_init(0);
-    //         gstate = PyGILState_Ensure();
-    //         PyThreadState *tstate = _PyThreadState_GET();
-    //         PyInterpreterState *interp = tstate->interp;
-    //         // PyInterpreterState *interp = _PyInterpreterState_Main(); // another way to get interp
-    //         inspect_all_refchain(interp, curHeats_refchain);
-    //         PyGILState_Release(gstate);
-    //         uintptr_t curHeats_casted_refchain = (uintptr_t)curHeats_refchain;
-    //         all_heats_table_insert(allHeats, &outter_key_wrapper, &curHeats_casted_refchain);
-
-    //         fprintf(stderr, "peeking GC list...\n");
-    //         clock_gettime(CLOCK_MONOTONIC, &ts);
-    //         outter_key_wrapper.ts = ts;
-    //         curHeats_gc_list = cur_heats_table_init(0);
-    //         op_gc_table *cur_op_gc_table;
-    //         op_gc_table_locked_table *cur_op_gc_locked_table;
-    //         cur_op_gc_table = op_gc_table_init(0);
-    //         gstate = PyGILState_Ensure();
-    //         gc_get_objects_impl_op_gc(-1, cur_op_gc_table);                   // dummy
-    //         cur_op_gc_locked_table = op_gc_table_lock_table(cur_op_gc_table); // for iterating, remember to free this
-    //         uintptr_t each_op;
-    //         op_gc_table_iterator *op_gc_it = op_gc_table_locked_table_begin(cur_op_gc_locked_table);
-    //         op_gc_table_iterator *op_gc_end = op_gc_table_locked_table_end(cur_op_gc_locked_table);
-    //         Temperature dummy_temp = {
-    //             .prev_refcnt = 0, // Initialize prev_refcnt
-    //             .diffs = {0},     // Initialize all elements of diffs to 0
-    //             .cur_sizeof = 1   // Example: Initialize cur_sizeof to the size of the Temperature struct
-    //         };
-    //         for (; !op_gc_table_iterator_equal(op_gc_it, op_gc_end); op_gc_table_iterator_increment(op_gc_it))
-    //         {
-    //             each_op = *op_gc_table_iterator_key(op_gc_it);
-    //             cur_heats_table_insert(curHeats_gc_list, &each_op, &dummy_temp);
-    //             PyObject *container_op = (PyObject *)each_op;
-    //             // if (_Py_IsImmortal(container_op))
-    //             // // {
-    //             // PyObject_Print(container_op, stderr, 1);
-    //             // fprintf(stderr, " in container list\n");
-    //             // }
-    //             update_recursive(container_op, curHeats_gc_list); // inserts dummy_temp here
-    //         }
-    //         fprintf(stderr, "# refchain: %ld, # GC list: %ld\n", cur_heats_table_size(curHeats_refchain), cur_heats_table_size(curHeats_gc_list));
-    //         PyGILState_Release(gstate);
-    //         op_gc_table_iterator_free(op_gc_end);
-    //         op_gc_table_iterator_free(op_gc_it);
-    //         op_gc_table_locked_table_free(cur_op_gc_locked_table);
-    //         op_gc_table_free(cur_op_gc_table);
-    //         uintptr_t curHeats_casted_gc_list = (uintptr_t)curHeats_gc_list;
-    //         all_heats_table_insert(allHeats, &outter_key_wrapper, &curHeats_casted_gc_list);
-    //     }
-    //     usleep(bookkeep_args->sample_dur);
-    // }
-    // if (doIO_)
-    // {
-    //     fprintf(stderr, "doing IO...\n");
-    //     fflush(stderr);
-    //     cur_heats_table *curHeats;
-    //     cur_heats_table_locked_table *curHeats_locked;
-    //     all_heats_table_iterator *allHeats_it, *allHeats_end;
-    //     cur_heats_table_iterator *curHeats_it, *curHeats_end;
-    //     IO_start = clock();
-    //     uintptr_t found_each_cur_heats;
-    //     uintptr_t foundInner;
-    //     allHeats_locked = all_heats_table_lock_table(allHeats);
-    //     allHeats_it = all_heats_table_locked_table_begin(allHeats_locked);
-    //     allHeats_end = all_heats_table_locked_table_end(allHeats_locked);
-    //     for (; !all_heats_table_iterator_equal(allHeats_it, allHeats_end); all_heats_table_iterator_increment(allHeats_it))
-    //     {
-    //         outter_key_wrapper = *all_heats_table_iterator_key(allHeats_it);
-    //         found_each_cur_heats = *all_heats_table_iterator_mapped(allHeats_it);
-    //         curHeats = (cur_heats_table *)found_each_cur_heats;
-    //         curHeats_locked = cur_heats_table_lock_table(curHeats);
-    //         // fprintf(stderr, "inner table size is %lu\n", cur_heats_table_locked_table_size(curHeats_locked));
-    //         // fflush(stderr);
-    //         curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
-    //         curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
-    //         Temperature *temp_ptr;
-    //         for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end);
-    //              cur_heats_table_iterator_increment(curHeats_it))
-    //         {
-    //             foundInner = *cur_heats_table_iterator_key(curHeats_it);
-    //             temp_ptr = cur_heats_table_iterator_mapped(curHeats_it);
-    //             fprintf(bookkeep_args->fd, "%ld.%ld\t%ld",
-    //                     outter_key_wrapper.ts.tv_sec, outter_key_wrapper.ts.tv_nsec, foundInner);
-    //             // for (int i = 0; i < rescan_thresh - 1; i++)
-    //             // {
-    //             //     fprintf(bookkeep_args->fd, "\t%ld", temp_ptr->diffs[i]);
-    //             // }
-    //             fprintf(bookkeep_args->fd, "\t%u\n", temp_ptr->cur_sizeof);
-    //             // fprintf(bookkeep_args->fd, "\n");
-    //         }
-    //         cur_heats_table_iterator_free(curHeats_end);
-    //         cur_heats_table_iterator_free(curHeats_it);
-    //         cur_heats_table_locked_table_free(curHeats_locked);
-    //         cur_heats_table_free(curHeats);
-    //     }
-    //     all_heats_table_iterator_free(allHeats_it);
-    //     all_heats_table_iterator_free(allHeats_end);
-    //     IO_end = clock();
-    //     whole_IO_time = (double)(IO_end - IO_start) / CLOCKS_PER_SEC;
-    //     fprintf(stderr, "flushing time: %.3f seconds\n", whole_IO_time);
-    // }
-    // // double avg_hold_GIL_time = total_hold_GIL_time / total_slow_num;
-    // // fprintf(stderr, "total slow num: %d, avg hold GIL time: %.3f, total hold GIL time: %.3f\n",
-    // //         total_slow_num, avg_hold_GIL_time, total_hold_GIL_time);
-    // // double avg_update_time = total_hold_fast_update_refcnt_time / total_fast_num;
-    // // double avg_insert_time = total_insert_record_time / total_fast_num;
-    // // fprintf(stderr, "total_fast_num: %d, avg fast update time(no GIL): %.3f, avg fast insert time(no GIL): %.3f\n",
-    // //         total_fast_num, avg_update_time, avg_insert_time);
-    // // fprintf(stderr, "total_traverse_GC_list_time: %.3f\n", total_time_GC_List);
-
-    // all_heats_table_locked_table_free(allHeats_locked);
-    // all_heats_table_free(allHeats);
-    // terminate_flag_refchain = 0;
-    // fprintf(stderr, "finish bookkeeping, shutdown\n");
+            fast_scan_idx = 0;
+        }
+        cur_fast_start = clock();
+        if (fast_scan_idx == 0)
+        {
+            for (int i = 0; i < old_num_op; i++)
+            {
+                all_temps[i].diffs[0] = 0;
+                all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+            }
+        }
+        else if (fast_scan_idx == 1)
+        {
+            record_temp(fast_scan_idx, rescan_thresh);
+        }
+        else if (fast_scan_idx == 2)
+        {
+            record_temp(fast_scan_idx, rescan_thresh);
+        }
+        else
+        {
+            record_temp(fast_scan_idx, rescan_thresh);
+        }
+        // if (first_ever_entering)
+        //     first_ever_entering = false;
+        double cur_fast_time = ((double)(clock() - cur_fast_start)) / CLOCKS_PER_SEC;
+        fprintf(stderr, "fast %d, cur_fast_time: %.3f\n", fast_scan_idx, cur_fast_time);
+        if (++fast_scan_idx == rescan_thresh)
+        {
+            fast_scan_idx = -1; // roll back to slow
+            fprintf(stderr, "a bunch of fasts finished, gather info...\n");
+            // if (PyGILState_Check())
+            // {
+            //     fprintf(stderr, "GIL is held\n");
+            // }
+            // else
+            // {
+            //     fprintf(stderr, "GIL not held\n");
+            // }
+            // total_migration_time += try_trigger_migration(rescan_thresh);
+            if (doIO_)
+            {
+                fprintf(stderr, "flushing...\n");
+                PyGILState_STATE gstate = PyGILState_Ensure();
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                for (int i = 0; i < old_num_op; i++)
+                {
+                    bool print_obj = false;
+                    for (int j = 0; j < rescan_thresh; j++)
+                    {
+                        short cur_his = all_temps[i].diffs[j];
+                        if (cur_his != 0)
+                        {
+                            print_obj = true;
+                            break;
+                        }
+                        // fprintf(global_bookkeep_args->fd, "%hd\t", all_temps[i].diffs[j]);
+                    }
+                    uintptr_t found_inner = (uintptr_t)all_temps[i].op;
+                    if (print_obj && !check_in_collected(all_temps[i].op))
+                    {
+                        fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
+                        fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
+                        for (int j = 0; j < rescan_thresh; j++)
+                        {
+                            fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
+                        }
+                        fprintf(global_bookkeep_args->fd, "\t");
+                        // if (PyUnicode_Check(all_temps[i].op))
+                        if (!PyDict_Check(all_temps[i].op) && !PyList_Check(all_temps[i].op))
+                        {
+                            PyObject_Print(all_temps[i].op, global_bookkeep_args->fd, 0);
+                        }
+                        fprintf(global_bookkeep_args->fd, "\n");
+                    }
+                }
+                fflush(global_bookkeep_args->fd);
+                PyGILState_Release(gstate);
+            }
+        }
+        usleep(global_bookkeep_args->sample_dur);
+    }
     return NULL;
 }
+
 #endif /*PY_TRACE_REFS*/
 
 void *use_pref_cnt_modified(void *arg)
@@ -5843,33 +5927,6 @@ static double calculate_merge(int num_objs, int rescan_thresh)
     return cur_migration_time;
 }
 
-void record_temp(int scan_idx, int rescan_thresh)
-{
-    for (int i = 0; i < old_num_op; i++)
-    {
-        // temp_diff = abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-        // if (temp_diff > SHRT_MAX)
-        // {
-        //     all_temps[i].diffs[0] = 0; // unhot / mild hot
-        // }
-        // else
-        // {
-        //     all_temps[i].diffs[0] = (short)temp_diff;
-        // }
-        // or in a compact way:
-        // if (all_temps[i].diffs[rescan_thresh - 1] != 0)
-        {
-            all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-            // all_temps[i].diffs[scan_idx] = (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-            all_temps[i].prev_refcnt = all_temps[i].op->hotness;
-        }
-        // else
-        // {
-        // cold, do something?
-        // }
-    }
-}
-
 double try_trigger_migration(int rescan_thresh)
 {
     clock_t cur_time = clock();
@@ -5941,8 +5998,8 @@ void *manual_trigger_scan(void *arg)
     int trigger_drop_thresh = 50; // percentage
     bool do_drop_unhot_op;
     clock_t cur_fast_start, cur_fast_end;
-    all_heats_table *allHeats = all_heats_table_init(0);
-    all_heats_table_locked_table *allHeats_locked = NULL;
+    // all_heats_table *allHeats = all_heats_table_init(0);
+    // all_heats_table_locked_table *allHeats_locked = NULL;
     bool first_ever_entering = true;
     long temp_diff = 0;
     double total_migration_time = 0;
@@ -5963,8 +6020,8 @@ void *manual_trigger_scan(void *arg)
             //     usleep(100000);
             //     continue;
             // }
-            // try_trigger_slow_scan();
-            do_slow_scan();
+            try_trigger_slow_scan();
+            // do_slow_scan();
             fast_scan_idx = 0;
         }
         // do fast in here
@@ -5975,7 +6032,7 @@ void *manual_trigger_scan(void *arg)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
-                    all_temps[i].diffs[0] = 0;
+                    // all_temps[i].diffs[0] = 0;
                     all_temps[i].prev_refcnt = all_temps[i].op->hotness;
                 }
             }
@@ -5990,6 +6047,8 @@ void *manual_trigger_scan(void *arg)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
+                    // if (all_temps[i].op->hotness == 0)
+                    //     continue;
                     all_temps[i].diffs[1] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
                     if (all_temps[i].diffs[1] != 0)
                     { // update lower and upper bound
@@ -6017,6 +6076,8 @@ void *manual_trigger_scan(void *arg)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
+                    // if (all_temps[i].op->hotness == 0)
+                    //     continue;
                     foundInner = (uintptr_t)all_temps[i].op;
                     if (foundInner > prev_changed_min && foundInner < prev_changed_max)
                     {
@@ -6045,7 +6106,7 @@ void *manual_trigger_scan(void *arg)
         cur_fast_end = clock();
 
         double cur_fast_time = ((double)(cur_fast_end - cur_fast_start)) / CLOCKS_PER_SEC;
-        fprintf(stderr, "fast %d, # all: %d, cur_fast_time: %.3f\n", fast_scan_idx, utlist_count, cur_fast_time);
+        fprintf(stderr, "fast %d, cur_fast_time: %.3f\n", fast_scan_idx, cur_fast_time);
         if (++fast_scan_idx == rescan_thresh)
         {
             fast_scan_idx = -1; // roll back to slow
@@ -6068,7 +6129,6 @@ void *manual_trigger_scan(void *arg)
                 clock_gettime(CLOCK_MONOTONIC, &ts);
                 for (int i = 0; i < old_num_op; i++)
                 {
-                    // fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld\t", ts.tv_sec, ts.tv_nsec, (uintptr_t)all_temps[i].op);
                     bool print_obj = false;
                     for (int j = 0; j < rescan_thresh; j++)
                     {
@@ -6076,17 +6136,28 @@ void *manual_trigger_scan(void *arg)
                         if (cur_his != 0)
                         {
                             print_obj = true;
+                            break;
                         }
                         // fprintf(global_bookkeep_args->fd, "%hd\t", all_temps[i].diffs[j]);
                     }
+                    uintptr_t found_inner = (uintptr_t)all_temps[i].op;
                     if (print_obj)
                     {
-                        fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, (uintptr_t)all_temps[i].op);
-                        fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(all_temps[i].op)->tp_name);
+                        // if (check_in_collected(found_inner))
+                        // {
+                        //     // fprintf(stderr, "collected: %ld\n", (uintptr_t)(all_temps[i].op));
+                        //     fprintf(stderr, "collected refcnt: \n%ld\t%ld\t", (uintptr_t)all_temps[i].op->ob_refcnt, (uintptr_t)all_temps[i].op->hotness);
+                        //     PyObject_Print(all_temps[i].op, stderr, 0); // only '' and '\n' got printed
+                        //                                                 // continue;
+                        // }
+                        fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
+                        // fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
                         for (int j = 0; j < rescan_thresh; j++)
                         {
                             fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
                         }
+                        // fprintf(global_bookkeep_args->fd, "\t");
+                        // PyObject_Print(all_temps[i].op, global_bookkeep_args->fd, 0);
                         fprintf(global_bookkeep_args->fd, "\n");
                     }
                 }

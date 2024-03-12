@@ -185,9 +185,7 @@ KHASH_SET_INIT_INT32(ptrset)
     _PyObject_Init(PyObject *op, PyTypeObject *typeobj)
     {
         assert(op != NULL);
-        // op->prev_refcnt = 0;
-        // op->cur_op_size = 0;
-        op->hotness = 0;
+        op->hotness = 1;
         Py_SET_TYPE(op, typeobj);
         if (_PyType_HasFeature(typeobj, Py_TPFLAGS_HEAPTYPE))
         {

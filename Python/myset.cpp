@@ -6,6 +6,7 @@
 
 static std::unordered_set<uintptr_t> dedup_set;
 static std::unordered_set<uintptr_t> global_unordered_set;
+static std::unordered_set<uintptr_t> collected_set;
 // typedef google::sparse_hash_set<int> MyHashSet;
 // static MyHashSet sparse_set;
 // dedup_set
@@ -62,4 +63,23 @@ extern "C" unsigned int get_global_size()
 extern "C" void erase_from_global(uintptr_t value)
 {
     global_unordered_set.erase(value);
+}
+
+extern "C" void print_global_addr(FILE *fd, int round)
+{
+    for (auto it = global_unordered_set.begin(); it != global_unordered_set.end(); ++it)
+    {
+        fprintf(fd, "%d\t%ld\n", round, *it);
+    }
+}
+// collected_set
+
+extern "C" void insert_into_collected(uintptr_t value)
+{
+    collected_set.insert(value);
+}
+
+extern "C" int check_in_collected(uintptr_t value)
+{
+    return collected_set.find(value) != collected_set.end();
 }

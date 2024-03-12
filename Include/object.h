@@ -216,7 +216,11 @@ check by comparing the reference count field to the immortality reference count.
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API + 0 < 0x030b0000
 #define Py_REFCNT(ob) Py_REFCNT(_PyObject_CAST(ob))
 #endif
-
+    static inline Py_ssize_t Py_HOTNESS(PyObject *ob)
+    {
+        return ob->hotness;
+    }
+#define Py_HOTNESS(ob) Py_HOTNESS(_PyObject_CAST(ob))
     // bpo-39573: The Py_SET_TYPE() function must be used to set an object type.
     static inline PyTypeObject *Py_TYPE(PyObject *ob)
     {
@@ -461,7 +465,6 @@ check by comparing the reference count field to the immortality reference count.
         int rescan_thresh;
         PyThreadState *mainThreadState;
         unsigned int live_time_thresh_arg;
-        unsigned int max_allowed_ctn;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
@@ -661,6 +664,7 @@ check by comparing the reference count field to the immortality reference count.
 
     static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
     {
+        op->hotness++;
 #if defined(Py_LIMITED_API) && (Py_LIMITED_API + 0 >= 0x030c0000 || defined(Py_REF_DEBUG))
         // Stable ABI implements Py_INCREF() as a function call on limited C API
         // version 3.12 and newer, and on Python built in debug mode. _Py_IncRef()
@@ -692,7 +696,6 @@ check by comparing the reference count field to the immortality reference count.
     op->ob_refcnt++;
 
 #endif
-    op->hotness++;
     _Py_INCREF_STAT_INC();
 #ifdef Py_REF_DEBUG
     _Py_INCREF_IncRefTotal();
@@ -710,6 +713,7 @@ check by comparing the reference count field to the immortality reference count.
     // Py_DecRef() accepts NULL whereas _Py_IncRef() doesn't.
     static inline void Py_DECREF(PyObject *op)
     {
+        op->hotness++;
 #if Py_LIMITED_API + 0 >= 0x030a00A7
         _Py_DecRef(op);
 #else
@@ -721,6 +725,7 @@ check by comparing the reference count field to the immortality reference count.
 #elif defined(Py_REF_DEBUG)
 static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
 {
+    op->hotness++;
     if (op->ob_refcnt <= 0)
     {
         _Py_NegativeRefcount(filename, lineno, op);
@@ -735,13 +740,13 @@ static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
     {
         _Py_Dealloc(op);
     }
-    op->hotness++;
 }
 #define Py_DECREF(op) Py_DECREF(__FILE__, __LINE__, _PyObject_CAST(op))
 
 #else
 static inline Py_ALWAYS_INLINE void Py_DECREF(PyObject *op)
 {
+    op->hotness++;
     // Non-limited C API and limited C API for Python 3.9 and older access
     // directly PyObject.ob_refcnt.
     if (_Py_IsImmortal(op))

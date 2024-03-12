@@ -76,7 +76,7 @@ dummy_func(
     PyObject *kwnames,
     int throwflag,
     binaryfunc binary_ops[],
-    PyObject *args[]
+    PyObject *args[],
 )
 {
     // Dummy labels.
@@ -192,8 +192,6 @@ dummy_func(
             value = GETLOCAL(oparg);
             assert(value != NULL);
             Py_INCREF(value);
-            fprintf(stderr, "LOAD_FAST\n");
-            PyObject_Print(value, stderr, 0);
         }
 
         inst(LOAD_FAST_AND_CLEAR, (-- value)) {
@@ -209,8 +207,6 @@ dummy_func(
 
         inst(STORE_FAST, (value --)) {
             SETLOCAL(oparg, value);
-            fprintf(stderr, "STORE_FAST\n");
-            PyObject_Print(value, stderr, 0);
         }
 
         super(LOAD_FAST__LOAD_FAST) = LOAD_FAST + LOAD_FAST;

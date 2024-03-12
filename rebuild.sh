@@ -5,6 +5,7 @@ rm -rf build
 rm -rf python
 
 # ./configure
+# ./configure --with-trace-refs
 # sleep 1
 
 echo "starting building..."

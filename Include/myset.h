@@ -20,6 +20,9 @@ extern "C"
     void free_global();
     unsigned int get_global_size();
     void erase_from_global(uintptr_t value);
+    void print_global_addr(FILE *fd, int round);
+    void insert_into_collected(uintptr_t value);
+    int check_in_collected(uintptr_t value);
 
 #ifdef __cplusplus
 }
