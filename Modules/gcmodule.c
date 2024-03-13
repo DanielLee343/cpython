@@ -86,6 +86,7 @@ unsigned long migration_time_thresh;
 #define DEPTH_THRESHOLD 100
 #define LOWER_BOUND 100000000000000
 #define RESET_MD_DEC_THRESH -100000
+#define HOT_THRESH 60 // means 60% of the objs will be migrated
 uintptr_t global_dummy;
 typedef struct heat_node
 {
@@ -135,12 +136,35 @@ typedef struct
     uintptr_t end;
 } PyObj_range;
 
+typedef struct op_hotness
+{
+    uintptr_t op;
+    unsigned long hotness;
+} op_hotness;
+
 int compareIntervals(const void *a, const void *b)
 {
     PyObj_range *A = (PyObj_range *)a;
     PyObj_range *B = (PyObj_range *)b;
     return A->start - B->start; // Corrected to compare start times
 }
+// int compareOpHotnessDesc(const void *a, const void *b)
+// {
+//     op_hotness *A = (op_hotness *)a;
+//     op_hotness *B = (op_hotness *)b;
+//     return B->hotness - A->hotness;
+// }
+int compareOpHotnessDesc(const void *a, const void *b)
+{
+    const op_hotness *A = (const op_hotness *)a;
+    const op_hotness *B = (const op_hotness *)b;
+    if (B->hotness > A->hotness)
+        return 1;
+    if (B->hotness < A->hotness)
+        return -1;
+    return 0;
+}
+
 static inline uintptr_t max(uintptr_t a, uintptr_t b)
 {
     return a > b ? a : b;
@@ -1730,8 +1754,9 @@ static double try_cascading_old(int slow_idx)
         gen_id_bound[gen_idx].low = local_lowest_op;
     }
     {
-        PyGC_Head *cur_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head; // by default, always 2
-        for (gc = GC_NEXT(cur_gen_head); gc != cur_gen_head; gc = GC_NEXT(gc))
+        PyGC_Head *oldest_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head;
+        PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
+        for (gc = GC_NEXT(tracing_head); gc != tracing_head; gc = GC_NEXT(gc))
         {
             container_op = FROM_GC(gc);
             uintptr_t casted_op = (uintptr_t)container_op;
@@ -1873,6 +1898,7 @@ void gen_temps()
         fprintf(stderr, "Time to reset metadata!\n");
     }
     prev_global_set_size = cur_global_set_size;
+    // logic: if the global set size decreased too much --> A LOT obj is GC-ed --> reset metadata
     if ((!all_temps && kv_size(local_ptr_vec) > 0) || diff_global_size < RESET_MD_DEC_THRESH)
     {
         // first time / reset metadata --> malloc
@@ -2036,7 +2062,7 @@ static bool try_trigger_slow_scan()
         return;
     clock_t cur_time = clock();
     long time_since_gc_triggerd = cur_time - last_gc_trigger_time;
-    if (time_since_gc_triggerd > get_live_time_thresh)
+    if (time_since_gc_triggerd > get_live_time_thresh) // current: 1s, is a good threshold?
     {
         // fprintf(stderr, "not there yet...\n");
         return false;
@@ -3896,27 +3922,21 @@ void record_temp(int scan_idx, int rescan_thresh)
         // {
         //     all_temps[i].diffs[0] = (short)temp_diff;
         // }
-        // or in a compact way:
-        // if (all_temps[i].diffs[rescan_thresh - 1] != 0)
         // if (!check_in_collected(all_temps[i].op))
         // if (all_temps[i].op->hotness == 0)
         //     continue; // dead, continue
-        // if (all_temps[i].diffs[rescan_thresh - 1] == 0)
-        // {
-        //     skipped++;
-        //     continue; // cold, continue
-        // }
+        if (all_temps[i].diffs[rescan_thresh - 1] == -1)
+        { // falls out of sampling range, skip
+            skipped++;
+        }
+        else
         {
             all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
             // all_temps[i].diffs[scan_idx] = (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
             all_temps[i].prev_refcnt = all_temps[i].op->hotness;
         }
-        // else
-        // {
-        // cold, do something?
-        // }
     }
-    // fprintf(stderr, "skipped %u objs\n", skipped);
+    fprintf(stderr, "skipped %u objs\n", skipped);
     // PyGILState_Release(gstate);
 }
 
@@ -5702,7 +5722,6 @@ finialize_bk:
 // }
 static void mergeIntervals(PyObj_range **intervalsPtr, int *size)
 {
-    fprintf(stderr, "old_size: %d\n", *size);
     qsort(*intervalsPtr, *size, sizeof(PyObj_range), compareIntervals);
 
     PyObj_range *new_ranges = (PyObj_range *)malloc(*size * sizeof(PyObj_range));
@@ -5721,7 +5740,6 @@ static void mergeIntervals(PyObj_range **intervalsPtr, int *size)
     {
         uintptr_t alignedStart = (*intervalsPtr)[i].start & PAGE_MASK;
         uintptr_t alignedEnd = ((*intervalsPtr)[i].end + PAGE_SIZE - 1) & PAGE_MASK;
-        // fprintf(stderr, "%ld - %ld\n", alignedStart, alignedEnd);
 
         if (alignedStart <= new_ranges[mergedIndex].end)
         {
@@ -5730,21 +5748,12 @@ static void mergeIntervals(PyObj_range **intervalsPtr, int *size)
         else
         {
             mergedIndex++;
-            // if (mergedIndex >= *size)
-            // { // Added a check to prevent out-of-bounds access
-            //     break;
-            // }
             new_ranges[mergedIndex].start = alignedStart;
             new_ranges[mergedIndex].end = alignedEnd;
-            // fprintf(stderr, "start: %ld, end: %ld\n", new_ranges[mergedIndex].start, new_ranges[mergedIndex].end);
         }
     }
 
     *size = mergedIndex + 1;
-    // for (int i = 0; i < *size; i++)
-    // {
-    //     fprintf(stderr, "%ld - %ld\n", new_ranges[i].start, new_ranges[i].end);
-    // }
     PyObj_range *newIntervals = (PyObj_range *)realloc(new_ranges, (*size) * sizeof(PyObj_range));
     if (newIntervals == NULL)
     {
@@ -5755,7 +5764,15 @@ static void mergeIntervals(PyObj_range **intervalsPtr, int *size)
         free(*intervalsPtr);
         *intervalsPtr = newIntervals;
     }
-    // fprintf(stderr, "new_size: %d\n", *size);
+    // for (int i = 0; i < *size; i++)
+    // {
+    //     uintptr_t diff = newIntervals->end - newIntervals->start;
+    //     if (diff > PAGE_SIZE)
+    //     {
+    //         fprintf(stderr, "obj size is larger than a PAGE!%ld\n", diff);
+    //     }
+    //     // fprintf(stderr, "start: %ld, end: %ld\n", newIntervals[i].start, newIntervals[i].end);
+    // }
 }
 
 int isBoundaryPresent(uintptr_t boundary, void **boundaries, int size)
@@ -5836,19 +5853,19 @@ void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundary
     return boundaries;
 }
 
+// main merging & migration function
 static double calculate_merge(int num_objs, int rescan_thresh)
 {
     if (PyGILState_Check() || old_num_op == 0)
     {
-        fprintf(stderr, "GIL held by slow or empty traced op, try merging later\n");
+        fprintf(stderr, "Unlikely, GIL held by slow or empty traced op, try merging later\n");
         usleep(250000); // 0.25s
         return;
     }
-    // heat_node *node_ptr;
+    // allocate the maximum possible size
     PyObj_range *pyobj_ranges = malloc(num_objs * sizeof(PyObj_range));
     if (!pyobj_ranges)
     {
-        // Handle malloc failure
         fprintf(stderr, "malloc failed\n");
         return -1.0;
     }
@@ -5856,14 +5873,14 @@ static double calculate_merge(int num_objs, int rescan_thresh)
     int actual_size = 0;
     for (int i = 0; i < num_objs; i++)
     {
-        if (all_temps[i].diffs[rescan_thresh - 1] != 0 && all_temps[i].cur_sizeof > 0)
+        if (all_temps[i].diffs[rescan_thresh - 1] != -1) // naive way to filter hot objs
         {
             pyobj_ranges[actual_size].start = (uintptr_t)all_temps[i].op;
             pyobj_ranges[actual_size].end = (uintptr_t)(all_temps[i].cur_sizeof) + pyobj_ranges[actual_size].start;
             actual_size++;
         }
     }
-
+    // realloc to the actual size
     if (actual_size > 0)
     {
         PyObj_range *temp = realloc(pyobj_ranges, actual_size * sizeof(PyObj_range));
@@ -5882,25 +5899,28 @@ static double calculate_merge(int num_objs, int rescan_thresh)
         return -1.0;
     }
 
-    fprintf(stderr, "pyobj_ranges size: %d\n", actual_size);
     int range_size = actual_size;
     fprintf(stderr, "Before merge size: %d\n", range_size);
 
     clock_t t = clock();
-    mergeIntervals(&pyobj_ranges, &range_size); // this contains bug
+    mergeIntervals(&pyobj_ranges, &range_size); // TODO: this is too slow
     fprintf(stderr, "merging time: %.3f\n", (double)(clock() - t) / CLOCKS_PER_SEC);
     fprintf(stderr, "After merge/align page size: %d\n", range_size);
 
     int num_pages = 0;
     void **pages = getPageBoundaries(pyobj_ranges, range_size, &num_pages);
     fprintf(stderr, "num_pages: %d\n", num_pages);
-    // for (int i = 0; i < num_pages; i++)
-    // {
-    //     if ((uintptr_t)(pages[i]) % PAGE_SIZE != 0)
-    //     {
-    //         fprintf(stderr, "not aligned %ld\n", pages[i]);
-    //     }
-    // }
+    free(pyobj_ranges);
+    if (0)
+    { // debugging, make sure all pages are aligned
+        for (int i = 0; i < num_pages; i++)
+        {
+            if ((uintptr_t)(pages[i]) % PAGE_SIZE != 0)
+            {
+                fprintf(stderr, "not aligned %ld\n", pages[i]);
+            }
+        }
+    }
 
     int *nodes = malloc(num_pages * sizeof(int));
     int *status = malloc(num_pages * sizeof(int));
@@ -5910,7 +5930,7 @@ static double calculate_merge(int num_objs, int rescan_thresh)
         // nodes[i] = 1; // CXL
     }
     clock_t migration_start = clock();
-    long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE); // demote
+    long ret = move_pages(0, num_pages, pages, nodes, status, MPOL_MF_MOVE);
     for (int i = 0; i < num_pages; ++i)
     {
         if (status[i] < 0)
@@ -5920,7 +5940,6 @@ static double calculate_merge(int num_objs, int rescan_thresh)
     }
     double cur_migration_time = (double)(clock() - migration_start) / CLOCKS_PER_SEC;
     fprintf(stderr, "curr migration time: %.3f\n", cur_migration_time);
-    free(pyobj_ranges);
     free(pages);
     free(nodes);
     free(status);
@@ -5937,24 +5956,74 @@ double try_trigger_migration(int rescan_thresh)
         fprintf(stderr, "skipping migration\n");
         return;
     }
-    // TODO: determine if enough datapoint to trigger migration
+    // TODO: figure out a fine-grained way to trigger migration, not only by checking time
     {
-    }
-
-    PyGILState_STATE gstate = PyGILState_Ensure();
-    clock_t start_get_sizeof = clock();
-    for (int i = 0; i < old_num_op; i++)
-    {
-        if (all_temps[i].diffs[rescan_thresh - 1] != 0)
+        // op_hotness *op_hotness_arr = malloc(old_num_op * sizeof(op_hotness));
+        op_hotness *op_hotness_arr = calloc(old_num_op, sizeof(op_hotness));
+        unsigned long hot_op_arr_size = 0;
+        for (int i = 0; i < old_num_op; i++)
         {
-            PyObject *op = all_temps[i].op;
-            all_temps[i].cur_sizeof = _PySys_GetSizeOf(op);
+            if (all_temps[i].diffs[rescan_thresh - 1] != -1)
+            {
+                unsigned long op_hotness_accum = 0;
+                for (int j = 0; j < rescan_thresh - 1; j++)
+                {
+                    if (all_temps[i].diffs[j] != 0)
+                    {
+                        op_hotness_accum += 1;
+                    }
+                }
+                op_hotness_arr[hot_op_arr_size].op = (uintptr_t)all_temps[i].op;
+                op_hotness_arr[hot_op_arr_size].hotness = op_hotness_accum;
+                hot_op_arr_size++;
+            }
         }
+        // realloc op_hotness_arr to hot_op_arr_size
+        if (hot_op_arr_size > 0)
+        {
+            op_hotness *temp = realloc(op_hotness_arr, hot_op_arr_size * sizeof(op_hotness));
+            if (temp == NULL)
+            {
+                free(op_hotness_arr); // Handle realloc failure
+                fprintf(stderr, "realloc failed\n");
+                return -1.0; // Or appropriate error handling
+            }
+            op_hotness_arr = temp;
+        }
+        else
+        {
+            fprintf(stderr, "Unlikely, all of them are COLD, double check\n");
+            free(op_hotness_arr); // Handle realloc failure
+            return -1.0;
+        }
+        // sort the op_hotness_arr by hotness
+        qsort(op_hotness_arr, hot_op_arr_size, sizeof(op_hotness), compareOpHotnessDesc);
+        // stopped here
     }
-    PyGILState_Release(gstate);
-    fprintf(stderr, "get sizeof time: %.3f seconds\n", (float)(clock() - start_get_sizeof) / CLOCKS_PER_SEC);
 
-    cur_migration_time = calculate_merge(old_num_op, rescan_thresh);
+    if (1) // do we need to calculate size? if most are int/double, then no need
+    {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+        clock_t start_get_sizeof = clock();
+        for (int i = 0; i < old_num_op; i++)
+        {
+            if (all_temps[i].diffs[rescan_thresh - 1] != -1)
+            {
+                PyObject *op = all_temps[i].op;
+                all_temps[i].cur_sizeof = _PySys_GetSizeOf(op);
+                // if (all_temps[i].cur_sizeof > PAGE_SIZE)
+                // {
+                //     fprintf(stderr, "Larger than a PAGE!%ld\t", all_temps[i].cur_sizeof);
+                //     PyObject_Print(op, stderr, 1);
+                //     fprintf(stderr, "\n");
+                // }
+            }
+        }
+        PyGILState_Release(gstate);
+        fprintf(stderr, "get sizeof time: %.3f seconds\n", (float)(clock() - start_get_sizeof) / CLOCKS_PER_SEC);
+    }
+
+    // cur_migration_time = calculate_merge(old_num_op, rescan_thresh);
     last_migrate_time = clock();
     return cur_migration_time;
 }
@@ -6032,7 +6101,6 @@ void *manual_trigger_scan(void *arg)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
-                    // all_temps[i].diffs[0] = 0;
                     all_temps[i].prev_refcnt = all_temps[i].op->hotness;
                 }
             }
@@ -6043,12 +6111,10 @@ void *manual_trigger_scan(void *arg)
         }
         else if (fast_scan_idx == 1)
         {
-            if (0)
+            if (1)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
-                    // if (all_temps[i].op->hotness == 0)
-                    //     continue;
                     all_temps[i].diffs[1] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
                     if (all_temps[i].diffs[1] != 0)
                     { // update lower and upper bound
@@ -6072,7 +6138,7 @@ void *manual_trigger_scan(void *arg)
         }
         else if (fast_scan_idx == 2)
         {
-            if (0)
+            if (1)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
@@ -6087,7 +6153,7 @@ void *manual_trigger_scan(void *arg)
                     }
                     else
                     {
-                        all_temps[i].diffs[rescan_thresh - 1] = 0;
+                        all_temps[i].diffs[rescan_thresh - 1] = -1;
                     }
                 }
             }
@@ -6096,8 +6162,8 @@ void *manual_trigger_scan(void *arg)
                 record_temp(fast_scan_idx, rescan_thresh);
             }
         }
-        // else if (fast_scan_idx != rescan_thresh - 1) // shall never reach rescan_thresh - 1
-        else
+        else if (fast_scan_idx != rescan_thresh - 1) // shall never reach last index
+        // else
         {
             record_temp(fast_scan_idx, rescan_thresh);
         }
@@ -6120,7 +6186,7 @@ void *manual_trigger_scan(void *arg)
             // {
             //     fprintf(stderr, "GIL not held\n");
             // }
-            // total_migration_time += try_trigger_migration(rescan_thresh);
+            total_migration_time += try_trigger_migration(rescan_thresh);
             if (doIO_)
             {
                 fprintf(stderr, "flushing...\n");
