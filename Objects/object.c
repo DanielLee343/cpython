@@ -2860,7 +2860,7 @@ extern "C"
 #endif
         (*dealloc)(op);
         // op->hotness = 0; // cannot do anything here
-        erase_from_global((uintptr_t)op);
+        // erase_from_global((uintptr_t)op);
 
 #ifdef Py_DEBUG
         // gh-89373: The tp_dealloc function must leave the current exception
