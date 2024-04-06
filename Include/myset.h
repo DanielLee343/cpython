@@ -24,6 +24,9 @@ extern "C"
     void insert_into_collected(uintptr_t value);
     int check_in_collected(uintptr_t value);
 
+    void try_add(uintptr_t op);
+    void try_delete(uintptr_t op);
+
 #ifdef __cplusplus
 }
 #endif

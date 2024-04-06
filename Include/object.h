@@ -49,7 +49,8 @@ extern "C"
     A standard interface exists for objects that contain an array of items
     whose size is determined when the object is allocated.
     */
-
+    // #include "myset.h"
+    // PyAPI_FUNC(void) try_add(uintptr_t);
 #include "pystats.h"
 // #undef CUCKOO_TABLE_NAME
 // #undef CUCKOO_KEY_TYPE
@@ -665,6 +666,7 @@ check by comparing the reference count field to the immortality reference count.
     static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
     {
         op->hotness++;
+        // try_add((uintptr_t)op);
 #if defined(Py_LIMITED_API) && (Py_LIMITED_API + 0 >= 0x030c0000 || defined(Py_REF_DEBUG))
         // Stable ABI implements Py_INCREF() as a function call on limited C API
         // version 3.12 and newer, and on Python built in debug mode. _Py_IncRef()
@@ -747,6 +749,7 @@ static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
 static inline Py_ALWAYS_INLINE void Py_DECREF(PyObject *op)
 {
     op->hotness++;
+    // try_add((uintptr_t)op);
     // Non-limited C API and limited C API for Python 3.9 and older access
     // directly PyObject.ob_refcnt.
     if (_Py_IsImmortal(op))

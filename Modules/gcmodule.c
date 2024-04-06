@@ -59,6 +59,7 @@ pthread_cond_t cond_fast = PTHREAD_COND_INITIALIZER;
 static double total_cur_cascading_time = 0.0;
 static int total_num_slow = 0;
 unsigned int prev_global_set_size = 0;
+uint64_t global_try2_sched = 0;
 
 khash_t(ptrset) * h;                          // for use_utlist
 khash_t(ptrset) * live_container_op_set;      // contains all live container objs (including newly survived)
@@ -1779,32 +1780,38 @@ static double try_cascading_old(int slow_idx)
     {
         PyGC_Head *oldest_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head;
         PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
-        for (gc = GC_NEXT(tracing_head); gc != tracing_head; gc = GC_NEXT(gc))
+        PyThreadState *tstate = _PyThreadState_GET();
+        GCState *gcstate = &tstate->interp->gc;
+        for (int i = 0; i < NUM_GENERATIONS; i++)
         {
-            container_op = FROM_GC(gc);
-            uintptr_t casted_op = (uintptr_t)container_op;
-            if (casted_op < cur_gen_low_bound)
+            tracing_head = GEN_HEAD(gcstate, i);
+            for (gc = GC_NEXT(tracing_head); gc != tracing_head; gc = GC_NEXT(gc))
             {
-                // if (found_in_kset(container_op))
-                if (check_in_global(casted_op))
-                // if (found_in_local_kset(container_op))
+                container_op = FROM_GC(gc);
+                uintptr_t casted_op = (uintptr_t)container_op;
+                // if (casted_op < cur_gen_low_bound)
                 {
-                    continue;
+                    // if (found_in_kset(container_op))
+                    if (check_in_global(casted_op))
+                    // if (found_in_local_kset(container_op))
+                    {
+                        continue;
+                    }
+                    // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
+                    // if (cur_len > LEN_THRESHOLD)
+                    //     continue;
+                    if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
+                    {
+                        local_lowest_op = casted_op;
+                    }
+                    // kh_put(ptrset, global_op_set, container_op, &ret);
+                    // kh_put(ptrset, cur_survived_op_set, container_op, &ret);
+                    insert_into_global(casted_op);                    // dedup
+                    kv_push(PyObject *, local_ptr_vec, container_op); // vector, dynamic resizing
+                    // *kl_pushp(ptrlist, survived_op_list) = container_op;
+                    unsigned int combined = 0;
+                    update_recursive_visitor(container_op, &combined); // cascading
                 }
-                // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
-                // if (cur_len > LEN_THRESHOLD)
-                //     continue;
-                if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
-                {
-                    local_lowest_op = casted_op;
-                }
-                // kh_put(ptrset, global_op_set, container_op, &ret);
-                // kh_put(ptrset, cur_survived_op_set, container_op, &ret);
-                insert_into_global(casted_op);                    // dedup
-                kv_push(PyObject *, local_ptr_vec, container_op); // vector, dynamic resizing
-                // *kl_pushp(ptrlist, survived_op_list) = container_op;
-                unsigned int combined = 0;
-                update_recursive_visitor(container_op, &combined); // cascading
             }
         }
         gen_id_bound[gen_idx].low = local_lowest_op;
@@ -1901,7 +1908,7 @@ static double try_cascading_old(int slow_idx)
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = end.tv_sec - start.tv_sec;
     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-    fprintf(stderr, "slow trace time (including holding GIL): %.3f seconds\n", elapsed);
+    fprintf(stderr, "slow trace time (including holding GIL): %.3f seconds, new op: %ld\n", elapsed, kv_size(local_ptr_vec));
     return elapsed;
 }
 unsigned int old_num_op = 0;
@@ -1918,7 +1925,8 @@ void gen_temps()
     }
     prev_global_set_size = cur_global_set_size;
     // logic: if the global set size decreased too much --> A LOT obj is GC-ed --> reset metadata
-    if ((!all_temps && kv_size(local_ptr_vec) > 0) || diff_global_size < RESET_MD_DEC_THRESH)
+    // || diff_global_size < RESET_MD_DEC_THRESH
+    if ((!all_temps && kv_size(local_ptr_vec) > 0))
     {
         // first time / reset metadata --> malloc
         free(all_temps);
@@ -1960,7 +1968,7 @@ void gen_temps()
         old_num_op = new_num_op;
         fprintf(stderr, "newly appended: %u, total: %u\n", num_op, old_num_op);
     }
-    fprintf(stderr, "forming all_temp time: %.3f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
+    fprintf(stderr, "forming all_temp time: %.3f sec, old_num_op: %d\n", (float)(clock() - t) / CLOCKS_PER_SEC, old_num_op);
 }
 
 void gen_temps_refchain()
@@ -2422,7 +2430,7 @@ invoke_gc_callback(PyThreadState *tstate, const char *phase,
     {
         // last_gc_trigger_time = clock();
         num_gc_cycles++;
-        fprintf(stderr, "collected: %ld, uncollectable: %ld\n", collected, uncollectable);
+        // fprintf(stderr, "collected: %ld, uncollectable: %ld\n", collected, uncollectable);
     }
 }
 
@@ -2491,7 +2499,7 @@ gc_collect_generations(PyThreadState *tstate)
             */
             if (i == NUM_GENERATIONS - 1 && gcstate->long_lived_pending < gcstate->long_lived_total / 4)
                 continue;
-            fprintf(stderr, "collecting gen %d\n", i);
+            // fprintf(stderr, "collecting gen %d\n", i);
             n = gc_collect_with_callback(tstate, i);
             break;
         }
@@ -3413,6 +3421,7 @@ void _PyObject_GC_Link(PyObject *op)
     g->_gc_prev = 0;
     gcstate->generations[0].count++; /* number of allocated GC objects */
     // fprintf(stderr, "GC trying to schedule\n"); // TODO, determine whether to schedule GC depends on number of recently scheduled
+    global_try2_sched++;
     if (gcstate->generations[0].count > gcstate->generations[0].threshold &&
         gcstate->enabled &&
         gcstate->generations[0].threshold &&
@@ -3941,6 +3950,7 @@ error:
 unsigned long cur_fast_num_hot = 0;
 unsigned long accum_num_hot = 0; // accumulated hot objs for 10 fast cycles
 unsigned long max_num_hot = 0;   // accumulated hot objs for 10 fast cycles
+unsigned int zero_hot_num = 0;
 
 void record_temp(int scan_idx, int rescan_thresh)
 {
@@ -3962,12 +3972,14 @@ void record_temp(int scan_idx, int rescan_thresh)
         // if (!check_in_collected(all_temps[i].op))
         // if (all_temps[i].op->hotness == 0)
         //     continue; // dead, continue
-        if (all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)) // falls out of sampling range, skip
+        // if (all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)) // falls out of sampling range, skip
+        // {
+        //     skipped++;
+        // }
+        // else
         {
-            skipped++;
-        }
-        else
-        {
+            if (!check_in_global((uintptr_t)all_temps[i].op))
+                continue;
             all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
             // all_temps[i].diffs[scan_idx] = (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
             all_temps[i].prev_refcnt = all_temps[i].op->hotness;
@@ -3976,6 +3988,10 @@ void record_temp(int scan_idx, int rescan_thresh)
             {
                 all_temps[i].diffs[rescan_thresh] += 1;
                 cur_fast_num_hot++;
+            }
+            else
+            {
+                zero_hot_num++;
             }
             if (all_temps[i].diffs[scan_idx] != all_temps[i].diffs[prev_scan_idx] && all_temps[i].diffs[prev_scan_idx] != 0 && all_temps[i].diffs[scan_idx] != 0) // TODO: for better cache hit, we can check diffs[scan_idx+1]
             {
@@ -6305,7 +6321,6 @@ int check_dram_free()
     }
     return 0; // terminated by user
 }
-
 void *manual_trigger_scan(void *arg)
 {
     if (numa_available() == -1 || numa_num_configured_nodes() < 2)
@@ -6364,6 +6379,9 @@ void *manual_trigger_scan(void *arg)
     // int scan_stat = 0;
     while (!terminate_flag_refchain)
     {
+        fprintf(stderr, "global_try2_sched: %ld\n", global_try2_sched);
+        global_try2_sched = 0;
+        zero_hot_num = 0;
         // if (check_dram_free() == 0)
         // {
         //     break;
@@ -6390,12 +6408,15 @@ void *manual_trigger_scan(void *arg)
         }
         // do fast in here
         cur_fast_start = clock();
+        fprintf(stderr, "old_num_op: %d\n", old_num_op);
         if (fast_scan_idx == 0)
         {
             if (reset_all_temps)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
+                    if (!check_in_global((uintptr_t)all_temps[i].op))
+                        continue;
                     all_temps[i].prev_refcnt = all_temps[i].op->hotness;
                 }
             }
@@ -6410,6 +6431,8 @@ void *manual_trigger_scan(void *arg)
             {
                 for (int i = 0; i < old_num_op; i++)
                 {
+                    if (!check_in_global((uintptr_t)all_temps[i].op))
+                        continue;
                     all_temps[i].diffs[1] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
                     if (all_temps[i].diffs[1] != 0)
                     { // update lower and upper bound
@@ -6425,6 +6448,10 @@ void *manual_trigger_scan(void *arg)
                         // calculate hotness
                         all_temps[i].diffs[rescan_thresh] += 1;
                         cur_fast_num_hot++;
+                    }
+                    else
+                    {
+                        zero_hot_num++;
                     }
                     // if (all_temps[i].diffs[1] != all_temps[i].diffs[0]) // not necessary, reason: all_temps[i].diffs[0] always == 0
                     // {
@@ -6447,6 +6474,8 @@ void *manual_trigger_scan(void *arg)
                     foundInner = (uintptr_t)all_temps[i].op;
                     if (foundInner > prev_changed_min && foundInner < prev_changed_max)
                     {
+                        if (!check_in_global((uintptr_t)all_temps[i].op))
+                            continue;
                         all_temps[i].diffs[2] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) > SHRT_MAX) ? -1 : (short)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
                         all_temps[i].prev_refcnt = all_temps[i].op->hotness;
                         // calculate hotness
@@ -6454,6 +6483,10 @@ void *manual_trigger_scan(void *arg)
                         {
                             all_temps[i].diffs[rescan_thresh] += 1;
                             cur_fast_num_hot++;
+                        }
+                        else
+                        {
+                            zero_hot_num++;
                         }
                         if (all_temps[i].diffs[2] != all_temps[i].diffs[1] && all_temps[i].diffs[2] != 0 && all_temps[i].diffs[1] != 0)
                         {
@@ -6472,12 +6505,11 @@ void *manual_trigger_scan(void *arg)
             }
         }
         else if (fast_scan_idx != rescan_thresh) // shall never reach last index
-        // else
         {
             record_temp(fast_scan_idx, rescan_thresh);
         }
         cur_fast_end = clock();
-        fprintf(stderr, "cur_fast_num_hot: %ld\n", cur_fast_num_hot);
+        fprintf(stderr, "cur_fast_num_hot: %ld, zero_hot_num: %d\n", cur_fast_num_hot, zero_hot_num);
 
         double cur_fast_time = ((double)(cur_fast_end - cur_fast_start)) / CLOCKS_PER_SEC;
         fprintf(stderr, "fast %d, cur_fast_time: %.3f\n", fast_scan_idx, cur_fast_time);
@@ -6522,7 +6554,7 @@ void *manual_trigger_scan(void *arg)
                         // fprintf(global_bookkeep_args->fd, "%hd\t", all_temps[i].diffs[j]);
                     }
                     uintptr_t found_inner = (uintptr_t)all_temps[i].op;
-                    if (print_obj)
+                    if (print_obj && check_in_global(found_inner))
                     {
                         // if (check_in_collected(found_inner))
                         // {
@@ -6532,7 +6564,7 @@ void *manual_trigger_scan(void *arg)
                         //                                                 // continue;
                         // }
                         fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
-                        fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
+                        // fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
                         for (int j = 0; j < rescan_thresh; j++)
                         {
                             fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);

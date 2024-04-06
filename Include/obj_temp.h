@@ -1,5 +1,6 @@
+#ifndef OBM_TEMP_H
+#define OBM_TEMP_H
 #include <Python.h>
-// #include "object.h"
 #include <stddef.h>
 typedef struct
 {
@@ -9,8 +10,6 @@ typedef struct
     size_t cur_sizeof; // 8
 } OBJ_TEMP;
 
-#ifndef OBM_TEMP_H
-#define OBM_TEMP_H
 #ifdef __cplusplus
 extern "C"
 {
