@@ -101,7 +101,9 @@ unsigned long num_gc_cycles = 0;
 #define DROP_OUT_OFF 14
 #define LOCATION_OFF 15
 #define HOTNESS_MASK 0x3FFF
-int reset_all_temps = 1;
+static int reset_all_temps = 1;
+unsigned long cur_fast_num_hot = 0;
+static bool very_first_bk = true;
 
 uintptr_t global_dummy;
 typedef struct heat_node
@@ -1792,8 +1794,8 @@ static double try_cascading_old(int slow_idx)
                 // if (casted_op < cur_gen_low_bound)
                 {
                     // if (found_in_kset(container_op))
-                    if (check_in_global(casted_op))
                     // if (found_in_local_kset(container_op))
+                    if (check_in_global(casted_op))
                     {
                         continue;
                     }
@@ -1819,8 +1821,8 @@ static double try_cascading_old(int slow_idx)
     // now, delete the collected objs
     // remove_dead_container_op(); // TODO: double check if necessary
 
-    if (0)
     // PyGILState_STATE gstate = PyGILState_Ensure();
+    if (0)
     {
         // unsigned int live_size = kh_size(live_container_op_set);
         // unsigned int collected_size = kh_size(collected_container_op_set);
@@ -2091,7 +2093,6 @@ static int try_trigger_slow_scan()
     // fprintf(stderr, "entering trigger slow scan...\n");
     if (!enable_bk)
         return -1;
-    // clock_t cur_time = clock();
     // long time_since_gc_triggerd = cur_time - last_gc_trigger_time;
     // double durationInSeconds = (double)time_since_gc_triggerd / CLOCKS_PER_SEC;
     // fprintf(stderr, "time_since_gc_triggerd: %ld, durationInSeconds: %.3f, get_live_time_thresh: %ld\n", time_since_gc_triggerd, durationInSeconds, get_live_time_thresh);
@@ -2103,14 +2104,15 @@ static int try_trigger_slow_scan()
     //     num_gc_cycles = 0;
     //     return 0;
     // }
-    // fprintf(stderr, "trying to do slow scan, num_gc_cycles in past cycle is: %ld\n", num_gc_cycles);
+    fprintf(stderr, "num_gc_cycles: %ld\n", num_gc_cycles);
     num_gc_cycles = 0;
-    // long time_elapsed = cur_time - last_live_trace_time;
-    // if (time_elapsed < get_live_time_thresh)
-    // {
-    //     return false;
-    // }
+    fprintf(stderr, "global_try2_sched: %ld\n", global_try2_sched);
+    // if (global_try2_sched < 10000 && !very_first_bk)
+    //     return 0;
     do_slow_scan();
+    global_try2_sched = 0; // reset try_sched counter if performed slow scan
+    if (very_first_bk)
+        very_first_bk = false;
     return 1;
 }
 
@@ -2762,10 +2764,10 @@ referentsvisit(PyObject *obj, PyObject *list)
 
 static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
 {
-    if (check_in_global((uintptr_t)inner_op))
     // if (check_in_set((uintptr_t)inner_op))
     // if (found_in_kset(inner_op))
     // if (found_in_local_kset(inner_op))
+    if (check_in_global((uintptr_t)inner_op))
     {
         return 0;
     }
@@ -3421,6 +3423,7 @@ void _PyObject_GC_Link(PyObject *op)
     g->_gc_prev = 0;
     gcstate->generations[0].count++; /* number of allocated GC objects */
     // fprintf(stderr, "GC trying to schedule\n"); // TODO, determine whether to schedule GC depends on number of recently scheduled
+    // if (enable_bk)
     global_try2_sched++;
     if (gcstate->generations[0].count > gcstate->generations[0].threshold &&
         gcstate->enabled &&
@@ -3826,8 +3829,8 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     PyTypeObject *t = Py_TYPE(each_op);
     if (!t->tp_iter || !t->tp_repr)
         return;
-    if (!PyObject_IS_GC(each_op))
-        return;
+    // if (!PyObject_IS_GC(each_op))
+    //     return;
     traverseproc traverse;
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
@@ -3947,9 +3950,7 @@ void gc_get_objects_impl_op_gc(Py_ssize_t generation, op_gc_table *table)
 error:
     return;
 }
-unsigned long cur_fast_num_hot = 0;
-unsigned long accum_num_hot = 0; // accumulated hot objs for 10 fast cycles
-unsigned long max_num_hot = 0;   // accumulated hot objs for 10 fast cycles
+unsigned long max_num_hot = 0; // accumulated hot objs for 10 fast cycles
 unsigned int zero_hot_num = 0;
 
 void record_temp(int scan_idx, int rescan_thresh)
@@ -3972,11 +3973,11 @@ void record_temp(int scan_idx, int rescan_thresh)
         // if (!check_in_collected(all_temps[i].op))
         // if (all_temps[i].op->hotness == 0)
         //     continue; // dead, continue
-        // if (all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)) // falls out of sampling range, skip
-        // {
-        //     skipped++;
-        // }
-        // else
+        if (all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)) // falls out of sampling range, skip
+        {
+            skipped++;
+        }
+        else
         {
             if (!check_in_global((uintptr_t)all_temps[i].op))
                 continue;
@@ -3999,7 +4000,7 @@ void record_temp(int scan_idx, int rescan_thresh)
             }
         }
     }
-    fprintf(stderr, "skipped %u objs\n", skipped);
+    // fprintf(stderr, "skipped %u objs\n", skipped);
     // PyGILState_Release(gstate);
 }
 
@@ -6051,35 +6052,25 @@ void **align_obj_2_page_bd(unsigned int num_op, uintptr_t *op_hotness_arr, int *
 }
 
 bool very_first_demotion = true;
-// void making_sure_stuff(int rescan_thresh)
-// {
-//     int is_accessed_num = 0;
-//     for (int i = 0; i < old_num_op; i++)
-//     {
-//         if ((all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK) && !(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
-//         {
-//             is_accessed_num++;
-//         }
-//     }
-//     fprintf(stderr, "is_accessed_num: %d, max_num_hot: %ld, old_num_op: %ld\n", is_accessed_num, max_num_hot, old_num_op);
-// }
 unsigned int empty_hotness_size = 0; // watermark that marks the split between completely cold VS warm/hot
 double try_trigger_migration_revised(int rescan_thresh)
 {
     // skipping migration if too close
-    long time_elapsed = clock() - last_migrate_time;
-    if (time_elapsed < migration_time_thresh) // 2s
+    // long time_elapsed = clock() - last_migrate_time;
+    // if (time_elapsed < migration_time_thresh) // 2s
+    // {
+    //     fprintf(stderr, "skipping migration\n");
+    //     return 0;
+    // }
+    // last_migrate_time = clock();
+    double hot_in_all = (double)max_num_hot / old_num_op;
+    fprintf(stderr, "hot_in_all: %.3f\n", hot_in_all);
+    if (old_num_op > 1000000 && hot_in_all < 0.1)
     {
-        fprintf(stderr, "skipping migration\n");
-        return 0;
+        fprintf(stderr, "It seems an init intensive workload! old_num_op is large but cur_fast_num_hot is small, shouldn't touch\n");
+        return 0.0;
     }
-    last_migrate_time = clock();
-    // corner case: if workload does not see too much refcnt changes, just make sure everything in DRAM
-    if (old_num_op > 1000000 && accum_num_hot < 1000)
-    {
-        fprintf(stderr, "corner case: old_num_op is large but cur_fast_num_hot is small, shouldn't touch\n");
-        return 0;
-    }
+    return 0.0;
     // kvec_t(uintptr_t) hot_vec;
     // kvec_t(uintptr_t) cold_vec;
     // kv_init(hot_vec);
@@ -6199,16 +6190,13 @@ double try_trigger_migration(int rescan_thresh)
         return;
     }
 
-    int avg_fast_num_hot = accum_num_hot / rescan_thresh;
     unsigned int expected_num_hot = old_num_op * HOT_THRESH / 100;
-    uintptr_t *demote_op_arr = calloc(old_num_op - avg_fast_num_hot, sizeof(uintptr_t));
-    uintptr_t *promote_op_arr = calloc(avg_fast_num_hot, sizeof(uintptr_t));
     clock_gettime(CLOCK_MONOTONIC, &start);
     // 3.1 corner case: if old_num_op is large but cur_fast_num_hot is small, that means a lot of writing, then we by default migrate all to DRAM
     int actual_num_hot = 0;
-    if (old_num_op > 1000000 && accum_num_hot < 1000)
+    if (old_num_op > 1000000)
     {
-        fprintf(stderr, "corner case: old_num_op is large but cur_fast_num_hot is small, shouldn't touch\n");
+        fprintf(stderr, "old_num_op is large but cur_fast_num_hot is small, shouldn't touch\n");
         // for (int i = 0; i < old_num_op; i++)
         // {
         //     if (!(all_temps[i].diffs[rescan_thresh] & (1 << LOCATION_OFF)))
@@ -6334,15 +6322,6 @@ void *manual_trigger_scan(void *arg)
     // }
     // else if return 1: start triggering scan
 
-    // pthread_mutexattr_init(&attr);
-    // pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-
-    // pthread_mutex_init(&mutex, &attr);
-    // pthread_mutexattr_destroy(&attr);
-    // pthread_mutex_init(&mutex, NULL);
-    // pthread_cond_init(&cond_slow, NULL);
-    // pthread_cond_init(&cond_fast, NULL);
-
     enable_bk = true;
     global_bookkeep_args = (BookkeepArgs *)arg;
     if (!global_bookkeep_args->live_time_thresh_arg)
@@ -6379,8 +6358,6 @@ void *manual_trigger_scan(void *arg)
     // int scan_stat = 0;
     while (!terminate_flag_refchain)
     {
-        fprintf(stderr, "global_try2_sched: %ld\n", global_try2_sched);
-        global_try2_sched = 0;
         zero_hot_num = 0;
         // if (check_dram_free() == 0)
         // {
@@ -6407,8 +6384,8 @@ void *manual_trigger_scan(void *arg)
             fast_scan_idx = 0;
         }
         // do fast in here
+        // PyGILState_STATE gstate4_safety = PyGILState_Ensure();
         cur_fast_start = clock();
-        fprintf(stderr, "old_num_op: %d\n", old_num_op);
         if (fast_scan_idx == 0)
         {
             if (reset_all_temps)
@@ -6473,6 +6450,7 @@ void *manual_trigger_scan(void *arg)
                 {
                     foundInner = (uintptr_t)all_temps[i].op;
                     if (foundInner > prev_changed_min && foundInner < prev_changed_max)
+                    // if (1)
                     {
                         if (!check_in_global((uintptr_t)all_temps[i].op))
                             continue;
@@ -6510,7 +6488,7 @@ void *manual_trigger_scan(void *arg)
         }
         cur_fast_end = clock();
         fprintf(stderr, "cur_fast_num_hot: %ld, zero_hot_num: %d\n", cur_fast_num_hot, zero_hot_num);
-
+        // PyGILState_Release(gstate4_safety);
         double cur_fast_time = ((double)(cur_fast_end - cur_fast_start)) / CLOCKS_PER_SEC;
         fprintf(stderr, "fast %d, cur_fast_time: %.3f\n", fast_scan_idx, cur_fast_time);
         max_num_hot = max(max_num_hot, cur_fast_num_hot);
@@ -6529,10 +6507,8 @@ void *manual_trigger_scan(void *arg)
             // {
             //     fprintf(stderr, "GIL not held\n");
             // }
-            accum_num_hot += cur_fast_num_hot;
             // total_migration_time += try_trigger_migration(rescan_thresh);
             // total_migration_time += try_trigger_migration_revised(rescan_thresh);
-            accum_num_hot = 0;
             max_num_hot = 0;
             if (doIO_)
             {
@@ -6554,7 +6530,7 @@ void *manual_trigger_scan(void *arg)
                         // fprintf(global_bookkeep_args->fd, "%hd\t", all_temps[i].diffs[j]);
                     }
                     uintptr_t found_inner = (uintptr_t)all_temps[i].op;
-                    if (print_obj && check_in_global(found_inner))
+                    if (check_in_global(found_inner))
                     {
                         // if (check_in_collected(found_inner))
                         // {
