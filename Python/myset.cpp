@@ -5,11 +5,15 @@
 #include "../Include/obj_temp.h"
 #include <cstdint>
 #include <cstdio>
-
+#include <mutex>
+#include <Python.h>
+std::mutex global_set_mutex;
 static std::unordered_set<uintptr_t> dedup_set;
 static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_set<uintptr_t> collected_set;
 static std::unordered_map<uintptr_t, OBJ_TEMP> mp;
+extern OBJ_TEMP *all_temps;
+extern unsigned int old_num_op;
 // typedef google::sparse_hash_set<int> MyHashSet;
 // static MyHashSet sparse_set;
 // dedup_set
@@ -51,7 +55,13 @@ extern "C" void insert_into_global(uintptr_t value)
 
 extern "C" int check_in_global(uintptr_t value)
 {
-    return global_unordered_set.find(value) != dedup_set.end();
+    return global_unordered_set.find(value) != global_unordered_set.end();
+}
+
+extern "C" int check_in_global_safe(uintptr_t value)
+{
+    std::lock_guard<std::mutex> guard(global_set_mutex);
+    return global_unordered_set.find(value) != global_unordered_set.end();
 }
 
 extern "C" void free_global()
@@ -63,8 +73,15 @@ extern "C" unsigned int get_global_size()
 {
     return global_unordered_set.size();
 }
+
 extern "C" void erase_from_global(uintptr_t value)
 {
+    global_unordered_set.erase(value);
+}
+
+extern "C" void erase_from_global_safe(uintptr_t value)
+{
+    std::lock_guard<std::mutex> guard(global_set_mutex);
     global_unordered_set.erase(value);
 }
 
@@ -74,6 +91,27 @@ extern "C" void print_global_addr(FILE *fd, int round)
     {
         fprintf(fd, "%d\t%ld\n", round, *it);
     }
+}
+
+extern "C" void pop_all_temps()
+{
+    std::lock_guard<std::mutex> guard(global_set_mutex);
+    size_t num_op = global_unordered_set.size();
+    all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
+    size_t index = 0;
+    for (auto it = global_unordered_set.begin(); it != global_unordered_set.end(); ++it)
+    {
+        all_temps[index].op = (PyObject *)*it;
+        all_temps[index].prev_refcnt = 0;
+        index++;
+        // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
+    }
+    old_num_op = num_op;
+}
+
+extern "C" int valid_global_set()
+{
+    return (&global_unordered_set != nullptr);
 }
 // collected_set
 

@@ -38,7 +38,7 @@ to avoid the expense of doing their own locking).
 extern "C" {
 #endif
 
-
+PyThreadState *py_main_tstate = NULL;
 /****************************************/
 /* helpers for the current thread state */
 /****************************************/

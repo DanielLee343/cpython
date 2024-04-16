@@ -468,6 +468,7 @@ check by comparing the reference count field to the immortality reference count.
         unsigned int live_time_thresh_arg;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
+
     PyAPI_DATA(BookkeepArgs) bookkeepArgs;
     PyAPI_FUNC(void *) thread_trace_from_gc_list(void *arg);
     extern volatile short terminate_flag;

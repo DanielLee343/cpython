@@ -20,8 +20,7 @@
 #include "interpreteridobject.h"  // _PyInterpreterID_Type
 #include "myset.h"
 
-khash_t(ptrset) * global_op_set;
-
+unsigned long num_container_collected = 0;
 volatile short terminate_flag_refchain = 0;
 #ifdef Py_LIMITED_API
 // Prevent recursive call _Py_IncRef() <=> Py_INCREF()
@@ -32,24 +31,6 @@ volatile short terminate_flag_refchain = 0;
 extern "C"
 {
 #endif
-
-    static inline void
-    init_global_op_set()
-    {
-        fprintf(stderr, "initing global_op_set\n");
-        global_op_set = kh_init(ptrset);
-    }
-    static inline void
-    delete_from_global_op_set(PyObject *op)
-    {
-        khint_t k;
-        k = kh_get(ptrset, global_op_set, op); // Get the position of the key in the set
-
-        if (k != kh_end(global_op_set))
-        {
-            kh_del(ptrset, global_op_set, k); // Delete the key from the set
-        }
-    }
 
     /* Defined in tracemalloc.c */
     extern void _PyMem_DumpTraceback(int fd, const void *ptr);
@@ -96,7 +77,6 @@ extern "C"
 #undef CUCKOO_MAPPED_TYPE
 #include "op_gc.h"
     extern op_gc_table *global_op_table;
-
 #ifdef Py_REF_DEBUG
     /* We keep the legacy symbol around for backward compatibility. */
     Py_ssize_t _Py_RefTotal;
@@ -2214,7 +2194,6 @@ extern "C"
             init_refchain(interp);
         }
 #endif
-        // init_global_op_set();
     }
 
     extern PyTypeObject _Py_GenericAliasIterType;
@@ -2402,8 +2381,6 @@ extern "C"
 #ifdef Py_TRACE_REFS
         _Py_AddToAllObjects(op, 1);
 #endif
-        // int ret;
-        // kh_put(ptrset, global_op_set, (uintptr_t)op, &ret);
     }
 
     void
@@ -2838,6 +2815,7 @@ extern "C"
         op_gc_table_insert(global_op_table, &casted_op, &dummy_val);
         // fprintf("%ld ", op_gc_table_size(global_op_table));
     }
+    int enable_bk;
     void
     _Py_Dealloc(PyObject *op)
     {
@@ -2860,7 +2838,11 @@ extern "C"
 #endif
         (*dealloc)(op);
         // op->hotness = 0; // cannot do anything here
-        erase_from_global((uintptr_t)op);
+        if (enable_bk)
+        {
+            erase_from_global((uintptr_t)op);
+        }
+        num_container_collected++;
         // try_delete((uintptr_t)op);
 
 #ifdef Py_DEBUG
