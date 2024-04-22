@@ -371,9 +371,9 @@ take_gil(PyThreadState *tstate)
         unsigned long saved_switchnum = gil->switch_number;
 
         unsigned long interval = (gil->interval >= 1 ? gil->interval : 1);
-        if (tstate == py_main_tstate) {
-            interval /= 1000;
-        }
+        // if (tstate == py_main_tstate) {
+        //     interval *= 100;
+        // }
         int timed_out = 0;
         COND_TIMED_WAIT(gil->cond, gil->mutex, interval, timed_out);
 

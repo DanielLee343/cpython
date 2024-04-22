@@ -25,9 +25,9 @@ extern "C"
 
 #include "khash.h"
 #if INTPTR_MAX == INT64_MAX
-    KHASH_SET_INIT_INT64(ptrset)
+    KHASH_SET_INIT_INT64(ptrset_dup)
 #elif INTPTR_MAX == INT32_MAX
-KHASH_SET_INIT_INT32(ptrset)
+KHASH_SET_INIT_INT32(ptrset_dup)
 #else
 #error "Unsupported pointer size"
 #endif

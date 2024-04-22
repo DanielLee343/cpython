@@ -19,6 +19,7 @@
 #include "pycore_unionobject.h"   // _PyUnion_Type
 #include "interpreteridobject.h"  // _PyInterpreterID_Type
 #include "myset.h"
+#include "kh_set_wrap.h"
 
 unsigned long num_container_collected = 0;
 volatile short terminate_flag_refchain = 0;
@@ -2808,14 +2809,7 @@ extern "C"
 
         Py_FatalError("_PyObject_AssertFailed");
     }
-    void insert_global_op_table(PyObject *op)
-    {
-        uintptr_t casted_op = (uintptr_t)op;
-        uint8_t dummy_val = 0;
-        op_gc_table_insert(global_op_table, &casted_op, &dummy_val);
-        // fprintf("%ld ", op_gc_table_size(global_op_table));
-    }
-    int enable_bk;
+    int enable_bk = 0;
     void
     _Py_Dealloc(PyObject *op)
     {
@@ -2840,9 +2834,17 @@ extern "C"
         // op->hotness = 0; // cannot do anything here
         if (enable_bk)
         {
+            // erase_from_libcuckoo((uintptr_t)op);
             erase_from_global((uintptr_t)op);
+            // erase_item_global_set_helper(op);
+            // khint_t k;
+            // k = kh_get(ptrset, global_op_set, (uintptr_t)op);
+            // if (k != kh_end(global_op_set))
+            // {
+            //     kh_del(ptrset, global_op_set, k);
+            // }
+            num_container_collected++;
         }
-        num_container_collected++;
         // try_delete((uintptr_t)op);
 
 #ifdef Py_DEBUG
