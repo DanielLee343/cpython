@@ -187,10 +187,7 @@ check by comparing the reference count field to the immortality reference count.
 #endif
 
             PyTypeObject *ob_type;
-        unsigned long hotness;
-        Py_ssize_t padding;
-        // Py_ssize_t prev_refcnt;
-        // uint32_t cur_op_size;
+        unsigned int hotness;
     };
 
 /* Cast argument to PyObject* type. */
@@ -483,6 +480,7 @@ check by comparing the reference count field to the immortality reference count.
     PyAPI_FUNC(void *) use_pref_cnt_modified(void *arg);
     PyAPI_FUNC(void *) use_utlist(void *arg);
     PyAPI_FUNC(void *) manual_trigger_scan(void *arg);
+    PyAPI_FUNC(void *) test_sigsegv_handler(void *arg);
     PyAPI_FUNC(void *) inspect_survived_objs(void *arg);
 
     /*

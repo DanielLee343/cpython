@@ -34,7 +34,6 @@ extern "C" {
 #include "pycore_unicodeobject.h" // struct _Py_unicode_state
 #include "pycore_warnings.h"      // struct _warnings_runtime_state
 
-
 struct _Py_long_state {
     int max_str_digits;
 };

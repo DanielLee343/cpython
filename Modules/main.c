@@ -7,6 +7,9 @@
 #include "pycore_pathconfig.h"    // _PyPathConfig_ComputeSysPath0()
 #include "pycore_pylifecycle.h"   // _Py_PreInitializeFromPyArgv()
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "obj_temp.h"             // OBJ_TEMP
+#include <setjmp.h>
+
 
 /* Includes for exit_sigint() */
 #include <stdio.h>                // perror()
@@ -703,7 +706,6 @@ Py_RunMain(void)
 
     return exitcode;
 }
-
 
 static int
 pymain_main(_PyArgv *args)
