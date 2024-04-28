@@ -10,7 +10,8 @@ extern "C"
 #endif
 
 #include "pycore_runtime.h" /* PyRuntimeState */
-
+#include <setjmp.h>
+extern sigjmp_buf jump_buffer;
     /* Check if the current thread is the main thread.
        Use _Py_IsMainInterpreter() to check if it's the main interpreter. */
     static inline int
@@ -155,29 +156,6 @@ extern "C"
 #define HEAD_UNLOCK(runtime) \
     PyThread_release_lock((runtime)->interpreters.mutex)
 
-// #ifdef Py_TRACE_REFS
-// #define REFCHAIN_TRACE(interp) &interp->object_state.refchain
-// #undef CUCKOO_TABLE_NAME
-// #undef CUCKOO_KEY_TYPE
-// #undef CUCKOO_MAPPED_TYPE
-// #include "curHeats.h"
-// static inline void inspect_all_refchain(PyInterpreterState *interp, cur_heats_table *curHeats)
-// {
-//     PyObject *refchain = REFCHAIN_TRACE(interp);
-//     PyObject *op;
-//     Temperature dummy_temp = {
-//         .prev_refcnt = 0, // Initialize prev_refcnt
-//         .diffs = {0},     // Initialize all elements of diffs to 0
-//         .cur_sizeof = 0   // Example: Initialize cur_sizeof to the size of the Temperature struct
-//     };
-//     for (op = refchain->_ob_next; op != refchain; op = op->_ob_next)
-//     {
-//         uintptr_t casted_op = (uintptr_t)op;
-//         // temp.prev_refcnt = op->ob_refcnt;
-//         cur_heats_table_insert(curHeats, &casted_op, &dummy_temp);
-//     }
-// }
-// #endif
 #ifdef __cplusplus
 }
 #endif

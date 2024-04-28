@@ -14,7 +14,6 @@ extern "C" {
 
 #include <signal.h>                // NSIG
 
-
 #ifdef _SIG_MAXSIG
    // gh-91145: On FreeBSD, <signal.h> defines NSIG as 32: it doesn't include
    // realtime signals: [SIGRTMIN,SIGRTMAX]. Use _SIG_MAXSIG instead. For

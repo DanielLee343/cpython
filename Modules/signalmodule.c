@@ -1898,6 +1898,12 @@ PyErr_SetInterruptEx(int signum)
     return 0;
 }
 
+// extern sigjmp_buf jump_buffer;
+void sigsegv_handler(int sig)
+{
+    // fprintf(stderr, "Caught segmentation fault, jumping to recovery point...\n");
+    siglongjmp(jump_buffer, 1);
+}
 void
 PyErr_SetInterrupt(void)
 {
@@ -1916,6 +1922,7 @@ signal_install_handlers(void)
 #ifdef SIGXFSZ
     PyOS_setsig(SIGXFSZ, SIG_IGN);
 #endif
+    PyOS_setsig(SIGSEGV, sigsegv_handler);
 
     // Import _signal to install the Python SIGINT handler
     PyObject *module = PyImport_ImportModule("_signal");

@@ -14,6 +14,7 @@
 #include "pycore_pystate.h"
 #include "pycore_runtime_init.h"  // _PyRuntimeState_INIT
 #include "pycore_sysmodule.h"
+#include <setjmp.h>
 
 /* --------------------------------------------------------------------------
 CAUTION
@@ -39,6 +40,7 @@ extern "C" {
 #endif
 
 PyThreadState *py_main_tstate = NULL;
+sigjmp_buf jump_buffer;
 /****************************************/
 /* helpers for the current thread state */
 /****************************************/
