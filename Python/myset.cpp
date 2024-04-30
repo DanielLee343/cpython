@@ -1,14 +1,12 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <tuple>
-// #include <sparsehash/sparse_hash_set>
 #include "../Include/myset.h"
 #include "../Include/obj_temp.h"
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
 #include <Python.h>
-#include <libcuckoo/cuckoohash_map.hh>
 std::mutex global_set_mutex;
 static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
@@ -16,8 +14,6 @@ static std::unordered_map<void *, int> pages_loc_hotness;
 static std::unordered_map<void *, std::pair<short, bool>> map_pair;
 extern OBJ_TEMP *all_temps;
 extern unsigned int old_num_op;
-// typedef google::sparse_hash_set<int> MyHashSet;
-libcuckoo::cuckoohash_map<uintptr_t, int> libcuckoo_table;
 
 // global_unordered_set
 extern "C" void insert_into_global(uintptr_t value)
@@ -83,30 +79,6 @@ extern "C" void reset_all_temps()
     }
     old_num_op = new_num_op;
 }
-
-// libcuckoo hash table
-// extern "C" void insert_into_libcuckoo(uintptr_t value)
-// {
-//     libcuckoo_table.insert(value, 0);
-// }
-// extern "C" int check_in_libcuckoo(uintptr_t value)
-// {
-//     int dummy;
-//     return libcuckoo_table.find(value, dummy);
-// }
-// extern "C" void erase_from_libcuckoo(uintptr_t value)
-// {
-//     libcuckoo_table.erase(value);
-// }
-// extern "C" void free_libcuckoo()
-// {
-//     libcuckoo_table.clear();
-// }
-
-// extern "C" unsigned int get_libcuckoo_size()
-// {
-//     return libcuckoo_table.size();
-// }
 
 // global_unordered_map
 extern "C" void insert_into_map(uintptr_t value, bool val)

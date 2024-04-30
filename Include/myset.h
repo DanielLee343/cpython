@@ -21,13 +21,6 @@ extern "C"
 
     void reset_all_temps();
 
-    // libcuckoo
-    // void insert_into_libcuckoo(uintptr_t value);
-    // int check_in_libcuckoo(uintptr_t value);
-    // void erase_from_libcuckoo(uintptr_t value);
-    // void free_libcuckoo();
-    // unsigned int get_libcuckoo_size();
-
     // global_unordered_map
     void insert_into_map(uintptr_t key, bool val);
     int check_in_map(uintptr_t value);
