@@ -139,6 +139,7 @@ int allow_fast = 0;
 int allow_slow = 0;
 PyGC_Head *global_old;
 static int gen_idx = -1;
+int check_dram_free();
 // sigjmp_buf jump_buffer;
 // void sigsegv_handler(int sig)
 // {
@@ -5529,35 +5530,51 @@ double try_trigger_migration_revised(int rescan_thresh)
     // short split = min_hotness + 10; //?
     short split = 1; // < split: cold, >= split, hot
     unsigned int max_size = get_pages_size();
-    int demo_size, promo_size;
+    int demo_pages, promo_pages;
     void **demote_pages = calloc(max_size, sizeof(void *));
     void **promote_pages = calloc(max_size, sizeof(void *));
+
     if (forced_promo || very_first_mig)
     {
-        populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_pages, &promo_pages, split);
     }
     else
     {
-        populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        populate_mig_pages(demote_pages, promote_pages, &demo_pages, &promo_pages, split);
+    }
+    // resize promo size if DRAM is scarce
+    {
+        int free_dram_size = check_dram_free();
+        fprintf(stderr, "free dram size: %d\n", free_dram_size);
+        assert(free_dram_size >= 0);
+        int promo_needed_mb = promo_pages / 256; //  1 MB == 256 pages
+        if (free_dram_size < promo_needed_mb)
+        {
+            promo_pages = free_dram_size * 256; // this is # page you can promote
+            fprintf(stderr, "resized promo_pages: %d\n", promo_pages);
+            if (promo_pages < max_size)
+                promote_pages = realloc(promote_pages, promo_pages * sizeof(void *));
+        }
     }
 
-    fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
+    fprintf(stderr, "pages size: %d, split: %hd, demo_pages: %d, promo_pages: %d\n", max_size, split, demo_pages, promo_pages);
     // realloc
-    if (demo_size > 0 && demo_size <= max_size)
+    if (demo_pages > 0)
     {
-        demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
-        cur_migration_time += do_migration(demote_pages, demo_size, 1); // demote to CXL
+        if (demo_pages < max_size)
+            demote_pages = realloc(demote_pages, demo_pages * sizeof(void *));
+        cur_migration_time += do_migration(demote_pages, demo_pages, CXL_MASK); // demote to CXL
         is_migration = true;
     }
     else
     {
         free(demote_pages);
     }
-
-    if (promo_size > 0 && promo_size <= max_size)
+    if (promo_pages > 0)
     {
-        promote_pages = realloc(promote_pages, promo_size * sizeof(void *));
-        cur_migration_time += do_migration(promote_pages, promo_size, 0); // promote to DRAM
+        if (promo_pages < max_size)
+            promote_pages = realloc(promote_pages, promo_pages * sizeof(void *));
+        cur_migration_time += do_migration(promote_pages, promo_pages, DRAM_MASK); // promote to DRAM
         is_migration = true;
     }
     else
@@ -6015,27 +6032,30 @@ double try_trigger_migration(int rescan_thresh)
 
 int check_dram_free()
 {
-    long long total_dram_size, free_dram_size;
+    long long total_dram_size;
+    long long free_dram_size;
     total_dram_size = numa_node_size(DRAM_MASK, NULL);
-    while (!terminate_flag_refchain)
+    // while (!terminate_flag_refchain)
+    // {
+    if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
     {
-        if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
-        {
-            fprintf(stderr, "Failed to get NUMA node size\n");
-            return NULL;
-        }
-        double freePercentage = ((double)free_dram_size / total_dram_size) * 100.0;
-
-        if (freePercentage < TRIGGER_SCAN_WM) // 35%
-        {
-            fprintf(stderr, "Start triggering scan\n");
-            return 1;
-        }
-        double freeMB = free_dram_size / 1048576.0;
-        fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, freeMB);
-        usleep(500000);
+        fprintf(stderr, "Failed to get DRAM node free size\n");
+        return -1;
     }
-    return 0; // terminated by user
+    // double freePercentage = ((double)free_dram_size / total_dram_size) * 100.0;
+
+    // if (freePercentage < TRIGGER_SCAN_WM) // 35%
+    // {
+    //     fprintf(stderr, "Start triggering scan\n");
+    //     return 1;
+    // }
+    double free_dram_size_mb = free_dram_size / 1048576.0;
+    free_dram_size_mb -= 400; // reserve 500mb for safety
+    return (int)free_dram_size_mb;
+    // fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, freeMB);
+    // usleep(500000);
+    // }
+    // return 0; // terminated by user
 }
 
 void *manual_trigger_scan(void *arg)

@@ -250,7 +250,6 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
             *demote_pages = it->first; // Store the pointer at the memory location
             demote_pages++;            // Move the pointer to the next memory location
             (*demo_size)++;            // Increment the value stored at the memory location
-            // it->second |= (1 << 30);   // mark in CXL
             it->second.second = 1;
         }
         else if (it->second.first >= split && it->second.second) // Most sig bit: 0(positive) hot dominant && in CXL
@@ -258,7 +257,6 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
             *promote_pages = it->first; // Store the pointer at the memory location
             promote_pages++;            // Move the pointer to the next memory location
             (*promo_size)++;            // Increment the value stored at the memory location
-            // it->second &= ~(1 << 30);   // mark in DRAM
             it->second.second = 0;
         }
     }
