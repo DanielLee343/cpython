@@ -32,10 +32,7 @@
 
 #include <locale.h> // setlocale()
 #include <stdlib.h> // getenv()
-#undef CUCKOO_TABLE_NAME
-#undef CUCKOO_KEY_TYPE
-#undef CUCKOO_MAPPED_TYPE
-#include "op_gc.h"
+
 #if defined(__APPLE__)
 #include <mach-o/loader.h>
 #endif
@@ -62,7 +59,6 @@
 extern "C"
 {
 #endif
-    op_gc_table *global_op_table = NULL;
     /* Forward declarations */
     static PyStatus add_main_module(PyInterpreterState *interp);
     static PyStatus init_import_site(void);
@@ -92,7 +88,7 @@ extern "C"
 
 #endif
 
-            _PyRuntimeState _PyRuntime
+        _PyRuntimeState _PyRuntime
 #if defined(__linux__) && (defined(__GNUC__) || defined(__clang__))
         __attribute__((section(".PyRuntime")))
 #endif
@@ -875,17 +871,6 @@ extern "C"
         Py_XDECREF(bimod);
         return _PyStatus_ERR("can't initialize builtins module");
     }
-
-    // static PyStatus pycore_init_op_table(PyInterpreterState *interp)
-    // {
-    //     // PyStatus status;
-    //     global_op_table = op_gc_table_init(0);
-    //     if (global_op_table == NULL)
-    //     {
-    //         return _PyStatus_NO_MEMORY();
-    //     }
-    //     return _PyStatus_OK();
-    // }
 
     static PyStatus
     pycore_interp_init(PyThreadState *tstate)
@@ -1915,7 +1900,6 @@ extern "C"
     Py_FinalizeEx(void)
     {
         int status = 0;
-        // op_gc_table_free(global_op_table);
         fprintf(stderr, "Py_FinalizeEx called\n");
         _PyRuntimeState *runtime = &_PyRuntime;
         if (!runtime->initialized)

@@ -49,14 +49,7 @@ extern "C"
     A standard interface exists for objects that contain an array of items
     whose size is determined when the object is allocated.
     */
-    // #include "myset.h"
 #include "pystats.h"
-// #undef CUCKOO_TABLE_NAME
-// #undef CUCKOO_KEY_TYPE
-// #undef CUCKOO_MAPPED_TYPE
-// #include "op_gc.h"
-// extern op_gc_table *global_op_table;
-
 /* Py_DEBUG implies Py_REF_DEBUG. */
 #if defined(Py_DEBUG) && !defined(Py_REF_DEBUG)
 #define Py_REF_DEBUG
@@ -478,7 +471,6 @@ check by comparing the reference count field to the immortality reference count.
     // PyAPI_FUNC(void *) print_obj_count(void *arg);
     PyAPI_FUNC(void *) compare_gc_refchain(void *arg);
     PyAPI_FUNC(void *) manual_trigger_scan(void *arg);
-    PyAPI_FUNC(void *) inspect_survived_objs(void *arg);
 
     /*
     Type flags (tp_flags)

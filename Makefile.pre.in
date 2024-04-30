@@ -371,10 +371,7 @@ PYTHON_OBJS=	\
 		Python/Python-tokenize.o \
 		Python/kh_set_wrap.o \
 		Python/obj_temp.o \
-		Python/allHeats.o \
-		Python/curHeats.o \
 		Python/myset.o \
-		Python/op_gc.o \
 		Python/pages2move.o \
 		Python/asdl.o \
 		Python/assemble.o \
@@ -1500,15 +1497,6 @@ Python/kh_set_wrap.o: $(srcdir)/Python/kh_set_wrap.c
 Python/obj_temp.o: $(srcdir)/Python/obj_temp.cpp
 		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/obj_temp.cpp
 
-Python/allHeats.o: $(srcdir)/Python/allHeats.cpp
-		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/allHeats.cpp
-
-Python/curHeats.o: $(srcdir)/Python/curHeats.cpp
-		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/curHeats.cpp
-
-Python/op_gc.o: $(srcdir)/Python/op_gc.cpp
-		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/op_gc.cpp
-
 Python/myset.o: $(srcdir)/Python/myset.cpp
 		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/myset.cpp
 
@@ -1829,9 +1817,6 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/internal/pycore_warnings.h \
 		$(srcdir)/Include/kh_set_wrap.h \
 		$(srcdir)/Include/obj_temp.h \
-		$(srcdir)/Include/allHeats.h \
-		$(srcdir)/Include/curHeats.h \
-		$(srcdir)/Include/op_gc.h \
 		$(srcdir)/Include/myset.h \
 		$(srcdir)/Include/pages2move.h \
 		$(DTRACE_HEADERS) \

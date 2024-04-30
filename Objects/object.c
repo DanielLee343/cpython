@@ -65,19 +65,7 @@ extern "C"
 
 #undef CHECK
     }
-#undef CUCKOO_TABLE_NAME
-#undef CUCKOO_KEY_TYPE
-#undef CUCKOO_MAPPED_TYPE
-#include "allHeats.h"
-#undef CUCKOO_TABLE_NAME
-#undef CUCKOO_KEY_TYPE
-#undef CUCKOO_MAPPED_TYPE
-#include "curHeats.h"
-#undef CUCKOO_TABLE_NAME
-#undef CUCKOO_KEY_TYPE
-#undef CUCKOO_MAPPED_TYPE
-#include "op_gc.h"
-    extern op_gc_table *global_op_table;
+
 #ifdef Py_REF_DEBUG
     /* We keep the legacy symbol around for backward compatibility. */
     Py_ssize_t _Py_RefTotal;
@@ -2814,7 +2802,6 @@ extern "C"
     _Py_Dealloc(PyObject *op)
     {
         // uintptr_t casted_op = (uintptr_t)op;
-        // op_gc_table_erase(global_op_table, &casted_op);
         PyTypeObject *type = Py_TYPE(op);
         destructor dealloc = type->tp_dealloc;
 #ifdef Py_DEBUG
@@ -2927,25 +2914,3 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-
-#ifdef Py_TRACE_REFS
-#define REFCHAIN_TRACE(interp) &interp->object_state.refchain
-void update_prev_refcnt_refchain(cur_heats_table_locked_table *curHeats_locked, cur_heats_table *curHeats)
-{
-    cur_heats_table_iterator *curHeats_it = cur_heats_table_locked_table_begin(curHeats_locked);
-    cur_heats_table_iterator *curHeats_end = cur_heats_table_locked_table_end(curHeats_locked);
-    cur_heats_table_locked_table_unlock(curHeats_locked);
-    uintptr_t each_op;
-    Temperature temp;
-    for (; !cur_heats_table_iterator_equal(curHeats_it, curHeats_end); cur_heats_table_iterator_increment(curHeats_it))
-    {
-        each_op = *cur_heats_table_iterator_key(curHeats_it);
-        PyObject *op = (PyObject *)each_op;
-        temp.prev_refcnt = op->ob_refcnt;
-        cur_heats_table_update(curHeats, &each_op, &temp);
-    }
-    cur_heats_table_iterator_free(curHeats_end);
-    cur_heats_table_iterator_free(curHeats_it);
-}
-
-#endif /* Py_TRACE_REFS */
