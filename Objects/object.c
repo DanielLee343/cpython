@@ -2836,7 +2836,7 @@ extern "C"
         {
             // erase_from_libcuckoo((uintptr_t)op);
             // erase_from_global((uintptr_t)op);
-            erase_from_map((uintptr_t)op);
+            // erase_from_map((uintptr_t)op);
             // erase_item_global_set_helper(op);
             // khint_t k;
             // k = kh_get(ptrset, global_op_set, (uintptr_t)op);

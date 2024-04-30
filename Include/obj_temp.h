@@ -3,6 +3,9 @@
 #include <Python.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#define PAGE_SIZE_ 4096
+#define PAGE_MASK_ (~(PAGE_SIZE_ - 1))
 typedef struct
 {
     PyObject *op;             // 8
@@ -20,6 +23,7 @@ extern "C"
     void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n);
     void cppParallelSort(OBJ_TEMP *all_temps, size_t n);
     void sortRawAddr(uintptr_t *ptr, size_t n);
+    void sortRawAddr_masked(uintptr_t *ptr, size_t n);
     void record_temp_cpp(int scan_idx, int rescan_thresh, unsigned int num_total);
     // void register_sigsegv(void);
     // void enable_sigsegv_handler(void);

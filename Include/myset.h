@@ -19,9 +19,6 @@ extern "C"
     void erase_from_global_safe(uintptr_t value);
     void print_global_addr(FILE *fd, int round);
 
-    void insert_into_collected(uintptr_t value);
-    int check_in_collected(uintptr_t value);
-
     void reset_all_temps();
 
     // libcuckoo
@@ -38,6 +35,20 @@ extern "C"
     void free_map();
     void reset_all_temps_map();
     unsigned int get_map_size();
+
+    // pages_loc_hotness
+    void insert_into_pages(uintptr_t page, bool is_hot);
+    int check_in_pages(void *page);
+    void erase_from_pages(void *page);
+    void free_pages();
+    unsigned int get_pages_size();
+    // bool get_location_pages(void *page);
+    // void set_location_pages(void *page, bool location);
+    void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
+    void populate_mig_pages_wo_checking(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
+    void get_page_hotness_bound(short *min, short *max);
+    void print_all_pages_hotness();
+    void reset_pages_hotness();
 
 #ifdef __cplusplus
 }
