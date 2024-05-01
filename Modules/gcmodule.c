@@ -38,7 +38,6 @@
 #include <setjmp.h>
 #include <string.h>
 
-#include "pages2move.h"
 #include "myset.h"
 #include "kh_set_wrap.h"
 pthread_mutex_t mutex;
@@ -75,7 +74,7 @@ unsigned long num_gc_cycles = 0;
 #define LOWER_BOUND 100000000000000
 #define RESET_MD_DEC_THRESH -100000
 #define HOT_THRESH 100
-#define TRIGGER_SCAN_WM 35
+#define TRIGGER_SCAN_WM 10 // trigger scan if free DRAN < 10%
 #define DRAM_MASK 0
 #define CXL_MASK 1
 #define DROP_OUT_OFF 7
@@ -3510,7 +3509,7 @@ void swap(OBJ_TEMP *a, OBJ_TEMP *b)
 // Dutch National Flag Algorithm, 3-way partitioning [0: low]: cold, [low: mid]: warm, [mid: old_num_op]: hot
 void sort_dnf(int rescan_thresh, int *low, int *mid, int *high)
 {
-    fprintf(stderr, "before low: %d, mid: %d, high: %d\n", *low, *mid, *high);
+    // fprintf(stderr, "before low: %d, mid: %d, high: %d\n", *low, *mid, *high);
     while (*mid <= *high)
     {
         if ((all_temps[*mid].diffs[rescan_thresh] & HOTNESS_MASK) < 1)
@@ -3639,36 +3638,6 @@ int isBoundaryPresent(uintptr_t boundary, void **boundaries, int size)
     }
     return 0;
 }
-// void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundarySize)
-// {
-//     void **boundaries = malloc(intervalSize * 2 * sizeof(void *)); // Allocate maximum possible size
-//     *boundarySize = 0;
-//     for (int i = 0; i < intervalSize; i++)
-//     {
-//         for (uintptr_t j = intervals[i].start; j < intervals[i].end; j += PAGE_SIZE)
-//         {
-//             // if (j % PAGE_SIZE != 0)
-//             // {
-//             //     fprintf(stderr, "j not aligned %ld\n", j);
-//             // }
-//             // if (!isBoundaryPresent(j, boundaries, *boundarySize))
-//             // if (!check_pages2move(j))
-//             {
-//                 // fprintf(stderr, "%ld\n", j);
-//                 boundaries[*boundarySize] = (void *)j;
-//                 (*boundarySize)++;
-//                 // insert_pages2move(j);
-//             }
-//             // else
-//             // {
-//             //     fprintf(stderr, "already inserted %ld\n", j);
-//             // }
-//         }
-//     }
-//     // free_pages2move();
-//     void **ret = realloc(boundaries, *boundarySize * sizeof(void *));
-//     return ret;
-// }
 
 void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundarySize)
 {
@@ -3863,49 +3832,45 @@ int comparePageCount(const void *a, const void *b)
     return ((PageCount *)b)->count - ((PageCount *)a)->count;
 }
 
-void align_obj_2_page_bd_sort_by_num_objs(unsigned int num_op, uintptr_t *op_hotness_arr, int *num_pages, bool is_hot)
+// void align_obj_2_page_bd_sort_by_num_objs(unsigned int num_op, uintptr_t *op_hotness_arr, bool is_hot)
+// {
+//     if (!op_hotness_arr || num_op == 0)
+//         return;
+//     sortRawAddr_masked(op_hotness_arr, num_op);
+//     for (unsigned int i = 0; i < num_op; i++)
+//     {
+//         insert_into_pages((op_hotness_arr[i] & PAGE_MASK), is_hot);
+//     }
+//     free(op_hotness_arr);
+// }
+void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end_idx, bool is_hot)
 {
-    if (!op_hotness_arr || num_op == 0)
-        return;
-    sortRawAddr_masked(op_hotness_arr, num_op);
-    // PageCount *pageCountArray = calloc(num_op, sizeof(PageCount));
-    // int pageCountIndex = 0;
-    // pageCountArray[0].pageAddress = (void *)op_hotness_arr[0];
-    // pageCountArray[0].count = 1;
-
-    for (unsigned int i = 0; i < num_op; i++)
+    if (end_idx == 0)
     {
-        // if (op_hotness_arr[i] == op_hotness_arr[i - 1])
-        // {
-        //     pageCountArray[pageCountIndex].count++;
-        // }
-        // else
-        // {
-        //     pageCountIndex++;
-        //     pageCountArray[pageCountIndex].pageAddress = (void *)op_hotness_arr[i];
-        //     pageCountArray[pageCountIndex].count = 1;
-        // }
-        insert_into_pages((op_hotness_arr[i] & PAGE_MASK), is_hot);
+        fprintf(stderr, "unlikely, error\n");
+        return;
     }
-
-    // Sort pages based on count
-    // qsort(pageCountArray, pageCountIndex + 1, sizeof(PageCount), comparePageCount);
-
-    // Filter top 50%
-    // int topPagesCount = (pageCountIndex + 1) / 2;
-    // void **topPages = calloc(topPagesCount, sizeof(void *));
-
-    // for (int i = 0; i < topPagesCount; i++)
-    // {
-    //     topPages[i] = pageCountArray[i].pageAddress;
-    // }
-
-    // free(pageCountArray);
-    free(op_hotness_arr);
-    // *num_pages = topPagesCount;
-
-    // fprintf(stderr, "After processing: %d pages, all hot pages: %d\n", topPagesCount, pageCountIndex);
-    // return topPages;
+    if (forced_promo)
+    {
+        assert(start_idx == 0);
+        assert(end_idx == old_num_op);
+        assert(is_hot = 1);
+        for (unsigned int i = start_idx; i < end_idx; i++)
+        {
+            short cur_op_hotness = 2;
+            uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
+            insert_into_pages(masked_addr, is_hot, cur_op_hotness);
+        }
+    }
+    else
+    {
+        for (unsigned int i = start_idx; i < end_idx; i++)
+        {
+            short cur_op_hotness = all_temps[i].diffs[rescan_thresh_glb] & HOTNESS_MASK;
+            uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
+            insert_into_pages(masked_addr, is_hot, cur_op_hotness);
+        }
+    }
 }
 
 bool is_old_num_remain_still()
@@ -3954,7 +3919,11 @@ double try_trigger_migration_revised(int rescan_thresh)
     double cur_migration_time = 0.0;
     int cold_warm_idx = 0, warm_hot_idx = 0, high = old_num_op - 1;
     int ret;
-    if (!forced_promo)
+    if (forced_promo)
+    {
+        cold_warm_idx = 0;
+    }
+    else
     {
         clock_gettime(CLOCK_MONOTONIC, &start);
         // cppDefaultSortAsc(all_temps, old_num_op);
@@ -3963,10 +3932,6 @@ double try_trigger_migration_revised(int rescan_thresh)
         elapsed = end.tv_sec - start.tv_sec;
         elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
         fprintf(stderr, "DNF sort time: %.3f, for %lu\n", elapsed, old_num_op);
-    }
-    else
-    {
-        cold_warm_idx = 0;
     }
 
     // if (cold_warm_idx >= high || warm_hot_idx >= high)
@@ -3993,90 +3958,92 @@ double try_trigger_migration_revised(int rescan_thresh)
     // else
     if (expected_num_cold > 0)
     { // get cold page candidate
-        cold_arr = calloc(expected_num_cold, sizeof(uintptr_t));
-        if (cold_arr == NULL)
-        {
-            fprintf(stderr, "calloc failed for cold\n");
-            return 0;
-        }
-        // populate cold_arr
-        for (unsigned int i = 0; i < expected_num_cold; i++)
-        {
-            if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
-            {
-                // uint8_t hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
-                // assert(hotness == 0); // test to ensure
-                uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, 0);
-                // fprintf(stderr, "The 8 MSB of the address is not 0x7F:  %ld\n", (uintptr_t)all_temps[i].op);
-                // fprintf(stderr, "%ld, %ld\n", (uintptr_t)all_temps[i].op, formed_op_w_hotness);
-                // fprintf(stderr, "%p + %d = %p\n", (void *)(uintptr_t)all_temps[i].op, hotness, (void *)formed_op_w_hotness);
-                cold_arr[i] = formed_op_w_hotness;
-                actual_cold_num++;
-            }
-        }
+      // cold_arr = calloc(expected_num_cold, sizeof(uintptr_t));
+      // if (cold_arr == NULL)
+      // {
+      //     fprintf(stderr, "calloc failed for cold\n");
+      //     return 0;
+      // }
+      // populate cold_arr
+      // for (unsigned int i = 0; i < expected_num_cold; i++)
+      // {
+      //     if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
+      //     {
+      //         // uint8_t hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
+      //         // assert(hotness == 0); // test to ensure
+      //         uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, 0);
+      //         // fprintf(stderr, "The 8 MSB of the address is not 0x7F:  %ld\n", (uintptr_t)all_temps[i].op);
+      //         // fprintf(stderr, "%ld, %ld\n", (uintptr_t)all_temps[i].op, formed_op_w_hotness);
+      //         // fprintf(stderr, "%p + %d = %p\n", (void *)(uintptr_t)all_temps[i].op, hotness, (void *)formed_op_w_hotness);
+      //         cold_arr[i] = formed_op_w_hotness;
+      //         actual_cold_num++;
+      //     }
+      // }
 
-        if (actual_cold_num > 0)
-        {
-            if (actual_cold_num < expected_num_cold)
-            {
-                cold_arr = realloc(cold_arr, actual_cold_num * sizeof(uintptr_t));
-            }
-            int num_cold_pages;
-            // void **cold_pages = align_obj_2_page_bd(actual_cold_num, cold_arr, &num_cold_pages); // cold_arr is freed inside
-            align_obj_2_page_bd_sort_by_num_objs(actual_cold_num, cold_arr, &num_cold_pages, 0); // cold_arrs is freed inside
-        }
-        else
-        {
-            free(cold_arr); // cold_arr not populated, free
-        }
+        // if (actual_cold_num > 0)
+        // {
+        //     if (actual_cold_num < expected_num_cold)
+        //     {
+        //         cold_arr = realloc(cold_arr, actual_cold_num * sizeof(uintptr_t));
+        //     }
+        //     int num_cold_pages;
+        // void **cold_pages = align_obj_2_page_bd(actual_cold_num, cold_arr, &num_cold_pages); // cold_arr is freed inside
+        // align_obj_2_page_bd_sort_by_num_objs(actual_cold_num, cold_arr, &num_cold_pages, 0); // cold_arrs is freed inside
+        align_obj_2_page_bd_from_all_temps(0, expected_num_cold, 0);
+        // }
+        // else
+        // {
+        //     free(cold_arr); // cold_arr not populated, free
+        // }
     }
     if (expected_num_hot > 0)
     { // get hot page candidate
-        hot_arr = calloc(expected_num_hot, sizeof(uintptr_t));
-        if (hot_arr == NULL)
-        {
-            fprintf(stderr, "calloc failed for hot\n");
-            return 0;
-        }
+      // hot_arr = calloc(expected_num_hot, sizeof(uintptr_t));
+      // if (hot_arr == NULL)
+      // {
+      //     fprintf(stderr, "calloc failed for hot\n");
+      //     return 0;
+      // }
 
-        if (forced_promo)
-        {
-            for (unsigned int i = 0; i < old_num_op; i++)
-            {
-                hotness = 2; // dummy size for forced promo, don't consider dropout
-                uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
-                hot_arr[i] = formed_op_w_hotness;
-                actual_hot_num++;
-            }
-        }
-        else
-        {
-            for (unsigned int i = expected_num_cold; i < old_num_op; i++)
-            {
-                if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
-                {
-                    hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
-                    uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
-                    hot_arr[i - expected_num_cold] = formed_op_w_hotness;
-                    actual_hot_num++;
-                }
-            }
-        }
+        // if (forced_promo)
+        // {
+        //     for (unsigned int i = 0; i < old_num_op; i++)
+        //     {
+        //         hotness = 2; // dummy size for forced promo, don't consider dropout
+        //         uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
+        //         hot_arr[i] = formed_op_w_hotness;
+        //         actual_hot_num++;
+        //     }
+        // }
+        // else
+        // {
+        //     for (unsigned int i = expected_num_cold; i < old_num_op; i++)
+        //     {
+        //         if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
+        //         {
+        //             hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
+        //             uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
+        //             hot_arr[i - expected_num_cold] = formed_op_w_hotness;
+        //             actual_hot_num++;
+        //         }
+        //     }
+        // }
 
-        if (actual_hot_num > 0)
-        {
-            if (actual_hot_num < expected_num_hot)
-            {
-                hot_arr = realloc(hot_arr, actual_hot_num * sizeof(uintptr_t));
-            }
-            int num_hot_pages;
-            // void **pages = align_obj_2_page_bd(actual_hot_num, hot_arr, &num_hot_pages); // hot_arr is freed inside
-            align_obj_2_page_bd_sort_by_num_objs(actual_hot_num, hot_arr, &num_hot_pages, 1); // hot_arr is freed inside
-        }
-        else
-        {
-            free(hot_arr);
-        }
+        // if (actual_hot_num > 0)
+        // {
+        // if (actual_hot_num < expected_num_hot)
+        // {
+        //     hot_arr = realloc(hot_arr, actual_hot_num * sizeof(uintptr_t));
+        // }
+        // int num_hot_pages;
+        // void **pages = align_obj_2_page_bd(actual_hot_num, hot_arr, &num_hot_pages); // hot_arr is freed inside
+        // align_obj_2_page_bd_sort_by_num_objs(actual_hot_num, hot_arr, &num_hot_pages, 1); // hot_arr is freed inside
+        align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
+        // }
+        // else
+        // {
+        //     free(hot_arr);
+        // }
     }
     // populate demote_pages and promote_pages
     short min_hotness, max_hotness;
@@ -4099,11 +4066,12 @@ double try_trigger_migration_revised(int rescan_thresh)
         populate_mig_pages(demote_pages, promote_pages, &demo_pages, &promo_pages, split);
     }
     // resize promo size if DRAM is scarce
+    if (0)
     {
         int free_dram_size = check_dram_free();
-        fprintf(stderr, "free dram size: %d\n", free_dram_size);
         assert(free_dram_size >= 0);
         int promo_needed_mb = promo_pages / 256; //  1 MB == 256 pages
+        fprintf(stderr, "free dram size: %d (MB), needed promo: %d (MB)\n", free_dram_size, promo_needed_mb);
         if (free_dram_size < promo_needed_mb)
         {
             promo_pages = free_dram_size * 256; // this is # page you can promote
@@ -4521,97 +4489,49 @@ double try_trigger_migration_revised_prev(int rescan_thresh)
     return cur_migration_time;
 }
 
-double try_trigger_migration(int rescan_thresh)
-{
-    struct timespec start, end;
-    double elapsed;
-    clock_t cur_time = clock();
-    double cur_migration_time = 0.0;
-    long time_elapsed = cur_time - last_migrate_time;
-    if (time_elapsed < migration_time_thresh)
-    {
-        fprintf(stderr, "skipping migration\n");
-        return;
-    }
-
-    unsigned int expected_num_hot = old_num_op * HOT_THRESH / 100;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    // 3.1 corner case: if old_num_op is large but cur_fast_num_hot is small, that means a lot of writing, then we by default migrate all to DRAM
-    int actual_num_hot = 0;
-    if (old_num_op > 1000000)
-    {
-        fprintf(stderr, "old_num_op is large but cur_fast_num_hot is small, shouldn't touch\n");
-        // for (int i = 0; i < old_num_op; i++)
-        // {
-        //     if (!(all_temps[i].diffs[rescan_thresh] & (1 << LOCATION_OFF)))
-        //     {
-        //         all_temps[i].diffs[rescan_thresh] |= (1 << LOCATION_OFF);
-        //         op_hotness_arr[actual_num_hot] = (uintptr_t)all_temps[i].op;
-        //         if (++actual_num_hot == expected_num_hot)
-        //             break;
-        //     }
-        // }
-    }
-    else // 3.2 normal case: sort all_temps by hotness, then pick the top expected_num_hot op's
-    {
-        unsigned int num_cold = 0, num_hot = 0;
-        // qsort(all_temps, old_num_op, sizeof(OBJ_TEMP), compareOpHotnessDesc);
-        cppDefaultSortAsc(all_temps, old_num_op); // sort all all_temps by hotness, cold -> warm -> hot. TODO: optimize sort (only full sort in first, partial sort later)
-        // cppParallelSort(all_temps, old_num_op);
-
-        for (int i = 0; i < old_num_op; i++)
-        {
-            if (!(all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK) && !(all_temps[i].diffs[rescan_thresh] & (1 << LOCATION_OFF))) // active op && location is not in DRAM
-            {
-                all_temps[i].diffs[rescan_thresh] |= (1 << LOCATION_OFF); // mark to CXL: 1
-                // kv_push(uintptr_t, cold_vec, (uintptr_t)all_temps[i].op);
-                // op_hotness_arr[actual_num_hot] = (uintptr_t)all_temps[i].op;
-                // if (++actual_num_hot == expected_num_hot)
-                // break;
-            }
-            // else
-            //     break;
-        }
-    }
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    elapsed = end.tv_sec - start.tv_sec;
-    elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-    fprintf(stderr, "get hot op time: %.3f seconds, original size: %ld, after truncation: %ld\n", elapsed, old_num_op, actual_num_hot);
-    if (actual_num_hot < expected_num_hot && actual_num_hot > 0)
-    {
-        fprintf(stderr, "not enough hot op's, only %d, need to realloc\n", actual_num_hot);
-        // op_hotness_arr = realloc(op_hotness_arr, actual_num_hot * sizeof(uintptr_t));
-    }
-
-    return cur_migration_time;
-}
-
 int check_dram_free()
 {
-    long long total_dram_size;
     long long free_dram_size;
-    total_dram_size = numa_node_size(DRAM_MASK, NULL);
-    // while (!terminate_flag_refchain)
-    // {
     if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
     {
         fprintf(stderr, "Failed to get DRAM node free size\n");
         return -1;
     }
-    // double freePercentage = ((double)free_dram_size / total_dram_size) * 100.0;
+    int free_dram_size_mb = (int)(free_dram_size / 1048576);
+    free_dram_size_mb = (free_dram_size_mb > 400) ? free_dram_size_mb - 400 : 0;
+    return free_dram_size_mb;
+}
 
-    // if (freePercentage < TRIGGER_SCAN_WM) // 35%
-    // {
-    //     fprintf(stderr, "Start triggering scan\n");
-    //     return 1;
-    // }
-    double free_dram_size_mb = free_dram_size / 1048576.0;
-    free_dram_size_mb -= 400; // reserve 500mb for safety
-    return (int)free_dram_size_mb;
-    // fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, freeMB);
-    // usleep(500000);
-    // }
-    // return 0; // terminated by user
+// return code:
+//  -1: error
+//  0: terminated by user
+//  1: trigger scan
+int trigger_bk()
+{
+    long long total_dram_size;
+    long long free_dram_size;
+    total_dram_size = numa_node_size(DRAM_MASK, NULL);
+    while (!terminate_flag_refchain)
+    {
+        if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
+        {
+            fprintf(stderr, "Unlikely! Failed to get DRAM node free size\n");
+            return -1;
+        }
+        double freePercentage = ((double)free_dram_size / total_dram_size) * 100.0;
+        double free_dram_size_mb = free_dram_size / 1048576.0;
+
+        // if (freePercentage < TRIGGER_SCAN_WM) // 35%
+        if (free_dram_size_mb < 200) // < remain hard 200mb in DRAM
+        {
+            fprintf(stderr, "Start triggering scan\n");
+            return 1;
+        }
+        // free_dram_size_mb -= 400; // reserve 400mb for safety
+        fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, free_dram_size_mb);
+        usleep(500000);
+    }
+    return 0; // terminated by user
 }
 
 void *manual_trigger_scan(void *arg)
@@ -4623,7 +4543,7 @@ void *manual_trigger_scan(void *arg)
     }
     // global_op_set = kh_init(ptrset);
     // init_global_set_helper();
-    // if (check_dram_free() == 0)
+    // if (trigger_bk() == 0)
     // {
     //     return NULL;
     // }
@@ -4664,23 +4584,10 @@ void *manual_trigger_scan(void *arg)
     // {
     //     usleep(200000);
     // } // what??
-    {
-        // enable_sigsegv_handler();
-        // if (sigsetjmp(jump_buffer, 1) == 0)
-        // {
-        //     int *ptr = NULL;
-        //     *ptr = 123;
-        // }
-        // else
-        // {
-        //     fprintf(stderr, "recovery\n");
-        // }
-    }
     while (!terminate_flag_refchain)
     {
     rollback_slow_scan:
-        zero_hot_num = 0;
-        // if (check_dram_free() == 0)
+        // if (trigger_bk() == 0)
         // {
         //     break;
         // }
@@ -4691,6 +4598,7 @@ void *manual_trigger_scan(void *arg)
         //     pthread_cond_wait(&cond_fast, &mutex); // wait for cond_fast to be signaled
         // }
         // allow_slow = 0;
+        zero_hot_num = 0;
         cur_fast_num_hot = 0; // reset for every fast scan
         not_in_global_set = 0;
         if (fast_scan_idx == -1)

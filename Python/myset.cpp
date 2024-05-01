@@ -11,7 +11,7 @@ std::mutex global_set_mutex;
 static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
 static std::unordered_map<void *, int> pages_loc_hotness;
-static std::unordered_map<void *, std::pair<short, bool>> map_pair;
+static std::unordered_map<uintptr_t, std::pair<short, bool>> map_pair;
 extern OBJ_TEMP *all_temps;
 extern unsigned int old_num_op;
 
@@ -133,25 +133,17 @@ uintptr_t reconstruct_page(uintptr_t value)
 }
 // pages_loc_hotness
 // map_pair
-extern "C" void insert_into_pages(uintptr_t combined, bool is_hot)
+extern "C" void insert_into_pages(uintptr_t page_addr, bool is_hot, short hotness)
 {
-    short extracted_hotness = (short)((combined & 0xFF0000000000) >> 40);
-    // fprintf(stderr, "extracted_hotness: %hd\n", extracted_hotness);
-    void *extracted_page = (void *)reconstruct_page(combined);
-    auto it = map_pair.find(extracted_page);
+    auto it = map_pair.find(page_addr);
     if (it != map_pair.end())
     {
         if (is_hot)
-            it->second.first += extracted_hotness;
-        // else
-        //     it->second.first--;
+            it->second.first += hotness;
     }
     else
     {
-        if (is_hot)
-            map_pair[extracted_page] = std::make_pair(extracted_hotness, false);
-        else
-            map_pair[extracted_page] = std::make_pair(0, false);
+        map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
     }
 }
 
@@ -168,13 +160,13 @@ extern "C" void insert_into_pages(uintptr_t combined, bool is_hot)
 //     return pages_loc_hotness[page] & (1 << 14);
 // }
 
-extern "C" int check_in_pages(void *page)
+extern "C" int check_in_pages(uintptr_t page)
 {
     // return pages_loc_hotness.find(page) != pages_loc_hotness.end();
     return map_pair.find(page) != map_pair.end();
 }
 
-extern "C" void erase_from_pages(void *page)
+extern "C" void erase_from_pages(uintptr_t page)
 {
     // pages_loc_hotness.erase(page);
     map_pair.erase(page);
@@ -219,16 +211,16 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
         // int processed = process_signed_value(it->second);
         if (it->second.first < split && !it->second.second) // Most sig bit: 1(negative) cold dominant && in DRAM
         {
-            *demote_pages = it->first; // Store the pointer at the memory location
-            demote_pages++;            // Move the pointer to the next memory location
-            (*demo_size)++;            // Increment the value stored at the memory location
+            *demote_pages = (void *)it->first; // Store the pointer at the memory location
+            demote_pages++;                    // Move the pointer to the next memory location
+            (*demo_size)++;                    // Increment the value stored at the memory location
             it->second.second = 1;
         }
         else if (it->second.first >= split && it->second.second) // Most sig bit: 0(positive) hot dominant && in CXL
         {
-            *promote_pages = it->first; // Store the pointer at the memory location
-            promote_pages++;            // Move the pointer to the next memory location
-            (*promo_size)++;            // Increment the value stored at the memory location
+            *promote_pages = (void *)it->first; // Store the pointer at the memory location
+            promote_pages++;                    // Move the pointer to the next memory location
+            (*promo_size)++;                    // Increment the value stored at the memory location
             it->second.second = 0;
         }
     }
@@ -241,17 +233,17 @@ extern "C" void populate_mig_pages_wo_checking(void **demote_pages, void **promo
         // int processed = process_signed_value(it->second);
         if (it->second.first < split) // Most sig bit: 1(negative) cold dominant && in DRAM
         {
-            *demote_pages = it->first; // Store the pointer at the memory location
-            demote_pages++;            // Move the pointer to the next memory location
-            (*demo_size)++;            // Increment the value stored at the memory location
+            *demote_pages = (void *)it->first; // Store the pointer at the memory location
+            demote_pages++;                    // Move the pointer to the next memory location
+            (*demo_size)++;                    // Increment the value stored at the memory location
             // it->second |= (1 << 30);   // mark in CXL
             it->second.second = 1;
         }
         else if (it->second.first >= split) // Most sig bit: 0(positive) hot dominant && in CXL
         {
-            *promote_pages = it->first; // Store the pointer at the memory location
-            promote_pages++;            // Move the pointer to the next memory location
-            (*promo_size)++;            // Increment the value stored at the memory location
+            *promote_pages = (void *)it->first; // Store the pointer at the memory location
+            promote_pages++;                    // Move the pointer to the next memory location
+            (*promo_size)++;                    // Increment the value stored at the memory location
             // it->second &= ~(1 << 30);   // mark in DRAM
             it->second.second = 0;
         }

@@ -372,7 +372,6 @@ PYTHON_OBJS=	\
 		Python/kh_set_wrap.o \
 		Python/obj_temp.o \
 		Python/myset.o \
-		Python/pages2move.o \
 		Python/asdl.o \
 		Python/assemble.o \
 		Python/ast.o \
@@ -1500,9 +1499,6 @@ Python/obj_temp.o: $(srcdir)/Python/obj_temp.cpp
 Python/myset.o: $(srcdir)/Python/myset.cpp
 		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/myset.cpp
 
-Python/pages2move.o: $(srcdir)/Python/pages2move.cpp
-		$(CXX) -c $(PY_CORE_CFLAGS) -o $@ $(srcdir)/Python/pages2move.cpp
-
 Python/importdl.o: $(srcdir)/Python/importdl.c
 		$(CC) -c $(PY_CORE_CFLAGS) -I$(DLINCLDIR) -o $@ $(srcdir)/Python/importdl.c
 
@@ -1818,7 +1814,6 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/kh_set_wrap.h \
 		$(srcdir)/Include/obj_temp.h \
 		$(srcdir)/Include/myset.h \
-		$(srcdir)/Include/pages2move.h \
 		$(DTRACE_HEADERS) \
 		@PLATFORM_HEADERS@ \
 		\

@@ -1900,7 +1900,6 @@ extern "C"
     Py_FinalizeEx(void)
     {
         int status = 0;
-        fprintf(stderr, "Py_FinalizeEx called\n");
         _PyRuntimeState *runtime = &_PyRuntime;
         if (!runtime->initialized)
         {
