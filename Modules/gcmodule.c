@@ -1524,13 +1524,13 @@ double try_cascading_old(int slow_idx)
     elapsed = end.tv_sec - start.tv_sec;
     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
     fprintf(stderr, "\nentering slow.. acquire GIL time: %.3f\n", elapsed);
+    int duration_limit = 2;
 
     PyGC_Head *gc;
     PyObject *container_op;
     int ret;
     fprintf(stderr, "global_old: %ld, generation: %d\n", (uintptr_t)global_old, gen_idx);
-    uintptr_t local_lowest_op = UINTPTR_MAX;
-    uintptr_t cur_gen_low_bound = gen_id_bound[gen_idx].low;
+
     if (gen_id_bound[gen_idx].head == 0)
     {
         gen_id_bound[gen_idx].head = (uintptr_t)global_old;
@@ -1539,54 +1539,62 @@ double try_cascading_old(int slow_idx)
     {
         fprintf(stderr, "head changed! not cool!\n");
     }
+
+    PyGC_Head *oldest_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head;
+    PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
+    PyThreadState *tstate = _PyThreadState_GET();
+    GCState *gcstate = &tstate->interp->gc;
+    for (int i = 0; i < NUM_GENERATIONS; i++)
     {
-        PyGC_Head *oldest_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head;
-        PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
-        PyThreadState *tstate = _PyThreadState_GET();
-        GCState *gcstate = &tstate->interp->gc;
-        for (int i = 0; i < NUM_GENERATIONS; i++)
+        uintptr_t local_lowest_op = UINTPTR_MAX;
+        uintptr_t cur_gen_low_bound = gen_id_bound[i].low;
+        tracing_head = GEN_HEAD(gcstate, i);
+        // struct timespec cutoff_start, cutoff_current;
+        // clock_gettime(CLOCK_MONOTONIC, &cutoff_start);
+        // long cutoff_counter = 0;
+        for (gc = GC_NEXT(tracing_head); gc != tracing_head; gc = GC_NEXT(gc))
         {
-            tracing_head = GEN_HEAD(gcstate, i);
-            for (gc = GC_NEXT(tracing_head); gc != tracing_head; gc = GC_NEXT(gc))
+            container_op = FROM_GC(gc);
+            uintptr_t casted_op = (uintptr_t)container_op;
+            if (casted_op < cur_gen_low_bound)
             {
-                container_op = FROM_GC(gc);
-                uintptr_t casted_op = (uintptr_t)container_op;
-                if (casted_op < cur_gen_low_bound)
+                // if (++cutoff_counter % 10 == 0)
+                // {
+                //     clock_gettime(CLOCK_MONOTONIC, &cutoff_current);
+                //     double elapsed_ = (cutoff_current.tv_sec - cutoff_start.tv_sec) + (cutoff_current.tv_nsec - cutoff_start.tv_nsec) / 1.0e9;
+                //     if (elapsed_ > duration_limit)
+                //     {
+                //         fprintf(stderr, "Early stop, elapsed_: %.3f, counter: %d\n", elapsed_, cutoff_counter);
+                //         // break;
+                //         goto early_stop;
+                //     }
+                // }
+                if (check_in_global(casted_op))
+                // if (check_in_map(casted_op))
+                // if (found_in_kset_helper(container_op))
                 {
-                    if (check_in_global(casted_op))
-                    // if (check_in_map(casted_op))
-                    // if (found_in_kset_helper(container_op))
-                    {
-                        continue;
-                    }
-                    // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
-                    // if (cur_len > LEN_THRESHOLD)
-                    //     continue;
-                    if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
-                    {
-                        local_lowest_op = casted_op;
-                    }
-                    insert_into_global(casted_op); // dedup
-                    // insert_into_map(casted_op, 0);
-                    // kh_put(ptrset, global_op_set, casted_op, &ret);
-                    // insert_global_set_helper(container_op);
-                    kv_push(PyObject *, local_ptr_vec, container_op);
-                    unsigned long combined = 0;
-                    update_recursive_visitor(container_op, &combined); // cascading
+                    continue;
                 }
+                // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
+                // if (cur_len > LEN_THRESHOLD)
+                //     continue;
+                if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
+                {
+                    local_lowest_op = casted_op;
+                }
+                insert_into_global(casted_op); // dedup
+                // insert_into_map(casted_op, 0);
+                // kh_put(ptrset, global_op_set, casted_op, &ret);
+                // insert_global_set_helper(container_op);
+                kv_push(PyObject *, local_ptr_vec, container_op);
+                unsigned long combined = 0;
+                update_recursive_visitor(container_op, &combined); // cascading
             }
         }
-        gen_id_bound[gen_idx].low = local_lowest_op;
+    early_stop:
+        gen_id_bound[i].low = local_lowest_op;
     }
-    fprintf(stderr, "max_len: %u, max_depth: %u\n", max_length, max_depth);
-    // now, delete the collected objs
-    // remove_dead_container_op(); // TODO: double check if necessary
-
-    // PyGILState_STATE gstate = PyGILState_Ensure();
-    // fprintf(stderr, "global_set_size: %u\n", my_set_size);
     PyGILState_Release(gstate);
-
-    // print_addr(global_bookkeep_args->fd, slow_idx);
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = end.tv_sec - start.tv_sec;
     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
@@ -4659,22 +4667,22 @@ void *manual_trigger_scan(void *arg)
         cur_hot_in_all = (double)max_num_hot / old_num_op;
         fprintf(stderr, "cur_hot_in_all: %.3f\n", cur_hot_in_all);
         // relaxed fast
-        // if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
-        // {
-        //     double deleted_in_all = (double)not_in_global_set / old_num_op;
-        //     if (deleted_in_all > 0.9)
-        //     {
-        //         fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
-        //         usleep(2000000);
-        //         fast_scan_idx = -2; // a lot of op are deleted, rollback to slow
-        //     }
-        //     else if (cur_hot_in_all < 0.01) // limited # changed op, OR, similar # hot, relax fast trace
-        //     {
-        //         fprintf(stderr, "small # changed, rollback to slow...\n");
-        //         usleep(2000000);
-        //         fast_scan_idx = -2;
-        //     }
-        // }
+        if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
+        {
+            // double deleted_in_all = (double)not_in_global_set / old_num_op;
+            // if (deleted_in_all > 0.9)
+            // {
+            //     fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
+            //     usleep(2000000);
+            //     fast_scan_idx = -2; // a lot of op are deleted, rollback to slow
+            // }
+            if (cur_hot_in_all < 0.01) // limited # changed op, OR, similar # hot, relax fast trace
+            {
+                fprintf(stderr, "small # changed, rollback to slow...\n");
+                usleep(2000000);
+                // fast_scan_idx = -2;
+            }
+        }
         if (very_first_bk)
             very_first_bk = false;
 
