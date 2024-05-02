@@ -284,6 +284,7 @@ extern "C" void print_all_pages_hotness()
 
 extern "C" void reset_pages_hotness()
 {
+    fprintf(stderr, "resetting pages hotness\n");
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         it->second.first = 0;

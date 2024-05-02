@@ -69,8 +69,8 @@ unsigned long migration_time_thresh;
 unsigned long num_gc_cycles = 0;
 #define PAGE_SIZE 4096
 #define PAGE_MASK (~(PAGE_SIZE - 1))
-#define LEN_THRESHOLD 0
-#define DEPTH_THRESHOLD 100
+#define LEN_THRESHOLD 2
+#define DEPTH_THRESHOLD 2
 #define LOWER_BOUND 100000000000000
 #define RESET_MD_DEC_THRESH -100000
 #define HOT_THRESH 100
@@ -80,6 +80,7 @@ unsigned long num_gc_cycles = 0;
 #define DROP_OUT_OFF 7
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x3F
+#define RESERVED_MEMORY_MB 200
 unsigned long cur_fast_num_hot = 0;
 static bool very_first_bk = true;
 unsigned long not_in_global_set = 0;
@@ -87,7 +88,9 @@ extern OBJ_TEMP *all_temps;
 bool is_migration = false;
 unsigned int old_num_op = 0;
 unsigned int prev_num_op = 0;
-unsigned int last_global_size = 0;
+unsigned int max_depth = 0;
+unsigned int max_length = 0;
+
 // typedef struct
 // {
 //     PyObject *op;      // 8
@@ -173,7 +176,7 @@ static inline uintptr_t max(uintptr_t a, uintptr_t b)
 volatile short terminate_flag = 0;
 
 typedef struct _gc_runtime_state GCState;
-void update_recursive_visitor(PyObject *each_op, unsigned int *depth);
+void update_recursive_visitor(PyObject *each_op, unsigned long *depth);
 void inner_traversing(PyObject *each_op, unsigned int *depth);
 bool found_in_local_kset(PyObject *op);
 static void add_to_survived_from_young(PyGC_Head *survived);
@@ -1505,7 +1508,7 @@ int check_object_type(PyObject *obj)
         return 1;
     return 0;
 }
-static double try_cascading_old(int slow_idx)
+double try_cascading_old(int slow_idx)
 {
     struct timespec start, end;
     double elapsed;
@@ -1516,7 +1519,6 @@ static double try_cascading_old(int slow_idx)
         fprintf(stderr, "returned\n");
         return;
     }
-    // clock_t start_gil = clock();
     PyGILState_STATE gstate = PyGILState_Ensure();
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = end.tv_sec - start.tv_sec;
@@ -1537,32 +1539,6 @@ static double try_cascading_old(int slow_idx)
     {
         fprintf(stderr, "head changed! not cool!\n");
     }
-    // struct timespec ts;
-    // clock_gettime(CLOCK_MONOTONIC, &ts);
-    if (0) // append first, cascade later
-    {
-        // unsigned long count = 0;
-        for (gc = GC_NEXT(global_old); gc != global_old; gc = GC_NEXT(gc))
-        {
-            container_op = FROM_GC(gc);
-            uintptr_t casted_op = (uintptr_t)container_op;
-            // unsigned long cur_len = Py_SIZE(container_op); // || cur_len > 10000000
-            // if (cur_len > 5)
-            //     continue;
-            if (casted_op < cur_gen_low_bound)
-            {
-                // if (!Py_TYPE(container_op)->tp_iter || check_io_type(container_op)) // this is slow
-                //     continue;
-                if (casted_op < local_lowest_op && casted_op > LOWER_BOUND)
-                {
-                    local_lowest_op = casted_op;
-                }
-                kv_push(PyObject *, local_ptr_vec, container_op);
-            }
-            // count++;
-        }
-        gen_id_bound[gen_idx].low = local_lowest_op;
-    }
     {
         PyGC_Head *oldest_gen_head = (PyGC_Head *)gen_id_bound[NUM_GENERATIONS - 1].head;
         PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
@@ -1575,7 +1551,7 @@ static double try_cascading_old(int slow_idx)
             {
                 container_op = FROM_GC(gc);
                 uintptr_t casted_op = (uintptr_t)container_op;
-                // if (casted_op < cur_gen_low_bound)
+                if (casted_op < cur_gen_low_bound)
                 {
                     if (check_in_global(casted_op))
                     // if (check_in_map(casted_op))
@@ -1594,14 +1570,15 @@ static double try_cascading_old(int slow_idx)
                     // insert_into_map(casted_op, 0);
                     // kh_put(ptrset, global_op_set, casted_op, &ret);
                     // insert_global_set_helper(container_op);
-                    kv_push(PyObject *, local_ptr_vec, container_op); // vector, dynamic resizing
-                    unsigned int combined = 0;
+                    kv_push(PyObject *, local_ptr_vec, container_op);
+                    unsigned long combined = 0;
                     update_recursive_visitor(container_op, &combined); // cascading
                 }
             }
         }
         gen_id_bound[gen_idx].low = local_lowest_op;
     }
+    fprintf(stderr, "max_len: %u, max_depth: %u\n", max_length, max_depth);
     // now, delete the collected objs
     // remove_dead_container_op(); // TODO: double check if necessary
 
@@ -1739,7 +1716,7 @@ static int try_trigger_slow_scan()
     {
         is_migration = false;
         reset_pages_hotness();
-        // fast path
+        // fast path, gc not aggresive, no need to trigger slow
         if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000))
         {
             fprintf(stderr, "clearing diffs in metadata\n");
@@ -1760,7 +1737,6 @@ static int try_trigger_slow_scan()
             {
                 for (int i = 0; i < 8; i++)
                 {
-                    all_temps[i].prev_refcnt = 0;
                     all_temps[i].diffs[i] = 0;
                 }
             }
@@ -1831,7 +1807,7 @@ static int try_trigger_slow_scan()
         fprintf(stderr, "not much new\n");
         global_try2_sched = 0;
         num_container_collected = 0;
-        return 0;
+        return 0; // no need to reset prev_refcnt
     }
     else
     {
@@ -1839,20 +1815,14 @@ static int try_trigger_slow_scan()
         if (!ret)
             fprintf(stderr, "\nerror\n");
     }
-    int num_inc_op = cur_global_size - last_global_size;
-    fprintf(stderr, "num_inc_op: %d, cur_global_size: %d, old_num_op: %d\n", num_inc_op, cur_global_size, old_num_op);
+    fprintf(stderr, "cur_global_size: %d, old_num_op: %d\n", cur_global_size, old_num_op);
 
-    if (num_inc_op < 0)
-    {
-        fprintf(stderr, "yesneed\n");
-    }
     kv_destroy(local_ptr_vec);
 
 reset_and_return:
     num_container_collected = 0;
     global_try2_sched = 0;
     num_gc_cycles = 0;
-    last_global_size = cur_global_size;
     return ret;
 }
 
@@ -2456,7 +2426,7 @@ referentsvisit(PyObject *obj, PyObject *list)
     return PyList_Append(list, obj) < 0;
 }
 
-static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
+static int cascadingvisitor(PyObject *inner_op, unsigned long *combined)
 {
     // if (check_in_set((uintptr_t)inner_op))
     // if (found_in_local_kset(inner_op))
@@ -2468,17 +2438,15 @@ static int cascadingvisitor(PyObject *inner_op, unsigned int *combined)
     }
 
     // *combined += 1; // increase length, stop while traversing
-    // unsigned int extracted_len = *combined & 0xFFFF;
-    // if (extracted_len > LEN_THRESHOLD)
+    // unsigned int extracted_len = *combined & 0xFFFFFFFF;
+    // if (extracted_len > LEN_THRESHOLD) //
     // {
-    //     return; // stop
+    //     // max_length = extracted_len;
+    //     return;
     // }
-    // fprintf(stderr, "length: %u\n", extracted_len);
 
-    // int ret;
     insert_into_global((uintptr_t)inner_op);
     // insert_into_map((uintptr_t)inner_op, 0);
-    // kh_put(ptrset, global_op_set, (uintptr_t)inner_op, &ret);
     // insert_global_set_helper(inner_op);
     kv_push(PyObject *, local_ptr_vec, inner_op); // vector, dynamic resizing
     // inner_traversing(inner_op, combined); // for testing gc.get_referents()
@@ -3296,26 +3264,12 @@ static bool ismapped(const void *ptr, int bytes)
     return valid;
 }
 
-void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
+void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
 {
     if (!each_op)
     {
         return;
     }
-    // if (PyList_Check(each_op))
-    // {
-    //     Py_ssize_t list_size = PyList_Size(each_op);
-    //     for (Py_ssize_t i = 0; i < list_size; i++)
-    //     {
-    //         PyObject *item = PyList_GetItem(each_op, i);
-    //         if (check_ipaddr_type(item))
-    //         {
-    //             fprintf(stderr, "skipping inner ipaddr\n");
-    //             return;
-    //         }
-    //         break;
-    //     }
-    // }
     if (_Py_IsImmortal(each_op))
     {
         return;
@@ -3330,24 +3284,19 @@ void update_recursive_visitor(PyObject *each_op, unsigned int *combined)
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
-    // {                                             // skip before traversing
-    //     unsigned long cur_len = Py_SIZE(each_op); // || cur_len > 10000000
-    //     if (cur_len > LEN_THRESHOLD)
-    //         return;
-    // }
-
-    unsigned int last_length = *combined & 0xFFFF;
-    *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
-    *combined += (1 << 16);  // increase depths
-    // {                        // skip large depth objs
-    //     unsigned int extractedDepth = (*combined >> 16);
-    //     if (extractedDepth > DEPTH_THRESHOLD)
+    // {
+    // unsigned int last_length = *combined & 0xFFFFFFFF;
+    // *combined &= 0xFFFFFFFF00000000; // reset the lower 2 bytes (lengths), this is needed
+    // *combined += ((uint64_t)1 << 32);
+    //     unsigned int extractedDepth = (*combined >> 32);
+    //     if (extractedDepth > DEPTH_THRESHOLD) //
     //     {
+    //         // max_depth = extractedDepth;
     //         return;
     //     }
     // }
     traverse(each_op, (visitproc)cascadingvisitor, combined);
-    *combined = (*combined & 0xFFFF0000) | last_length;
+    // *combined = (*combined & 0xFFFFFFFF00000000) | last_length;
 }
 
 unsigned long max_num_hot = 0; // accumulated hot objs for 10 fast cycles
@@ -3854,7 +3803,7 @@ void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end
     {
         assert(start_idx == 0);
         assert(end_idx == old_num_op);
-        assert(is_hot = 1);
+        assert(is_hot == 1);
         for (unsigned int i = start_idx; i < end_idx; i++)
         {
             short cur_op_hotness = 2;
@@ -3913,8 +3862,7 @@ double try_trigger_migration_revised(int rescan_thresh)
     double elapsed;
 
     cur_hot_in_all = (double)max_num_hot / old_num_op;
-    fprintf(stderr, "--------\ncur_hot_in_all in try_trigger_migration: %.3f\n", cur_hot_in_all);
-    unsigned int actual_cold_num = 0, actual_hot_num = 0;
+    fprintf(stderr, "--------start\ncur_hot_in_all in try_trigger_migration: %.3f\n", cur_hot_in_all);
     uintptr_t *cold_arr = NULL, *hot_arr = NULL;
     double cur_migration_time = 0.0;
     int cold_warm_idx = 0, warm_hot_idx = 0, high = old_num_op - 1;
@@ -3934,12 +3882,6 @@ double try_trigger_migration_revised(int rescan_thresh)
         fprintf(stderr, "DNF sort time: %.3f, for %lu\n", elapsed, old_num_op);
     }
 
-    // if (cold_warm_idx >= high || warm_hot_idx >= high)
-    // {
-    //     fprintf(stderr, "no need to mig, relax...\n");
-    //     return 0.0;
-    // }
-
     // |   cold   |        warm     |        hot       |
     // (<-----domote candidates---->)(promote candidates)
     // 0    cold_warm_idx      warm_hot_idx   old_num_op
@@ -3958,92 +3900,11 @@ double try_trigger_migration_revised(int rescan_thresh)
     // else
     if (expected_num_cold > 0)
     { // get cold page candidate
-      // cold_arr = calloc(expected_num_cold, sizeof(uintptr_t));
-      // if (cold_arr == NULL)
-      // {
-      //     fprintf(stderr, "calloc failed for cold\n");
-      //     return 0;
-      // }
-      // populate cold_arr
-      // for (unsigned int i = 0; i < expected_num_cold; i++)
-      // {
-      //     if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
-      //     {
-      //         // uint8_t hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
-      //         // assert(hotness == 0); // test to ensure
-      //         uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, 0);
-      //         // fprintf(stderr, "The 8 MSB of the address is not 0x7F:  %ld\n", (uintptr_t)all_temps[i].op);
-      //         // fprintf(stderr, "%ld, %ld\n", (uintptr_t)all_temps[i].op, formed_op_w_hotness);
-      //         // fprintf(stderr, "%p + %d = %p\n", (void *)(uintptr_t)all_temps[i].op, hotness, (void *)formed_op_w_hotness);
-      //         cold_arr[i] = formed_op_w_hotness;
-      //         actual_cold_num++;
-      //     }
-      // }
-
-        // if (actual_cold_num > 0)
-        // {
-        //     if (actual_cold_num < expected_num_cold)
-        //     {
-        //         cold_arr = realloc(cold_arr, actual_cold_num * sizeof(uintptr_t));
-        //     }
-        //     int num_cold_pages;
-        // void **cold_pages = align_obj_2_page_bd(actual_cold_num, cold_arr, &num_cold_pages); // cold_arr is freed inside
-        // align_obj_2_page_bd_sort_by_num_objs(actual_cold_num, cold_arr, &num_cold_pages, 0); // cold_arrs is freed inside
         align_obj_2_page_bd_from_all_temps(0, expected_num_cold, 0);
-        // }
-        // else
-        // {
-        //     free(cold_arr); // cold_arr not populated, free
-        // }
     }
     if (expected_num_hot > 0)
-    { // get hot page candidate
-      // hot_arr = calloc(expected_num_hot, sizeof(uintptr_t));
-      // if (hot_arr == NULL)
-      // {
-      //     fprintf(stderr, "calloc failed for hot\n");
-      //     return 0;
-      // }
-
-        // if (forced_promo)
-        // {
-        //     for (unsigned int i = 0; i < old_num_op; i++)
-        //     {
-        //         hotness = 2; // dummy size for forced promo, don't consider dropout
-        //         uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
-        //         hot_arr[i] = formed_op_w_hotness;
-        //         actual_hot_num++;
-        //     }
-        // }
-        // else
-        // {
-        //     for (unsigned int i = expected_num_cold; i < old_num_op; i++)
-        //     {
-        //         if (!(all_temps[i].diffs[rescan_thresh] & (1 << DROP_OUT_OFF)))
-        //         {
-        //             hotness = all_temps[i].diffs[rescan_thresh] & HOTNESS_MASK;
-        //             uintptr_t formed_op_w_hotness = combine_op_hotness((uintptr_t)all_temps[i].op, hotness);
-        //             hot_arr[i - expected_num_cold] = formed_op_w_hotness;
-        //             actual_hot_num++;
-        //         }
-        //     }
-        // }
-
-        // if (actual_hot_num > 0)
-        // {
-        // if (actual_hot_num < expected_num_hot)
-        // {
-        //     hot_arr = realloc(hot_arr, actual_hot_num * sizeof(uintptr_t));
-        // }
-        // int num_hot_pages;
-        // void **pages = align_obj_2_page_bd(actual_hot_num, hot_arr, &num_hot_pages); // hot_arr is freed inside
-        // align_obj_2_page_bd_sort_by_num_objs(actual_hot_num, hot_arr, &num_hot_pages, 1); // hot_arr is freed inside
+    {
         align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
-        // }
-        // else
-        // {
-        //     free(hot_arr);
-        // }
     }
     // populate demote_pages and promote_pages
     short min_hotness, max_hotness;
@@ -4053,67 +3914,65 @@ double try_trigger_migration_revised(int rescan_thresh)
     // short split = min_hotness + 10; //?
     short split = 1; // < split: cold, >= split, hot
     unsigned int max_size = get_pages_size();
-    int demo_pages, promo_pages;
+    int demo_size = 0, promo_size = 0;
     void **demote_pages = calloc(max_size, sizeof(void *));
     void **promote_pages = calloc(max_size, sizeof(void *));
 
-    if (forced_promo || very_first_mig)
+    if (very_first_mig)
     {
-        populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_pages, &promo_pages, split);
+        populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_size, &promo_size, split);
     }
     else
     {
-        populate_mig_pages(demote_pages, promote_pages, &demo_pages, &promo_pages, split);
+        populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
     }
     // resize promo size if DRAM is scarce
-    if (0)
+    int free_dram_size = check_dram_free();
+    assert(free_dram_size >= 0);
+    int free_dram_pages = free_dram_size * 256;
+    // first do deomotion, if needed
+    if (demo_size > 0)
     {
-        int free_dram_size = check_dram_free();
-        assert(free_dram_size >= 0);
-        int promo_needed_mb = promo_pages / 256; //  1 MB == 256 pages
-        fprintf(stderr, "free dram size: %d (MB), needed promo: %d (MB)\n", free_dram_size, promo_needed_mb);
-        if (free_dram_size < promo_needed_mb)
-        {
-            promo_pages = free_dram_size * 256; // this is # page you can promote
-            fprintf(stderr, "resized promo_pages: %d\n", promo_pages);
-            if (promo_pages < max_size)
-                promote_pages = realloc(promote_pages, promo_pages * sizeof(void *));
-        }
-    }
-
-    fprintf(stderr, "pages size: %d, split: %hd, demo_pages: %d, promo_pages: %d\n", max_size, split, demo_pages, promo_pages);
-    // realloc
-    if (demo_pages > 0)
-    {
-        if (demo_pages < max_size)
-            demote_pages = realloc(demote_pages, demo_pages * sizeof(void *));
-        cur_migration_time += do_migration(demote_pages, demo_pages, CXL_MASK); // demote to CXL
+        free_dram_pages += demo_size;
+        if (demo_size < max_size)
+            demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+        cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // demote to CXL
         is_migration = true;
     }
     else
     {
         free(demote_pages);
+        demote_pages = NULL;
     }
-    if (promo_pages > 0)
+
+    if (promo_size > 0)
     {
-        if (promo_pages < max_size)
-            promote_pages = realloc(promote_pages, promo_pages * sizeof(void *));
-        cur_migration_time += do_migration(promote_pages, promo_pages, DRAM_MASK); // promote to DRAM
+        fprintf(stderr, "free dram pages: %d (pages), needed promo: %d (pages)\n", free_dram_pages, promo_size);
+        if (free_dram_pages < promo_size)
+        {
+            promo_size = free_dram_pages;
+            fprintf(stderr, "resized promo_size: %d\n", promo_size);
+        }
+
+        if (promo_size < max_size)
+            promote_pages = realloc(promote_pages, promo_size * sizeof(void *));
+        cur_migration_time += do_migration(promote_pages, promo_size, DRAM_MASK); // promote to DRAM
         is_migration = true;
     }
     else
     {
         free(promote_pages);
+        promote_pages = NULL;
     }
+    fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
 
     prev_c_w_percent = cur_c_w_percent; // remember to update prev_c_w_percent for next try_migration
     if (very_first_mig)
         very_first_mig = false;
     if (forced_promo)
         forced_promo = false;
-    fprintf(stderr, "actual_hot_num: %d, actual_cold_num: %d\n", actual_hot_num, actual_cold_num);
     fprintf(stderr, "cur_migration_time: %.3f\n", cur_migration_time);
-    fprintf(stderr, "--------\n");
+    fprintf(stderr, "--------end\n");
     return cur_migration_time;
 }
 
@@ -4494,12 +4353,12 @@ int check_dram_free()
     long long free_dram_size;
     if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
     {
-        fprintf(stderr, "Failed to get DRAM node free size\n");
+        fprintf(stderr, "Failed to get DRAM size");
         return -1;
     }
-    int free_dram_size_mb = (int)(free_dram_size / 1048576);
-    free_dram_size_mb = (free_dram_size_mb > 400) ? free_dram_size_mb - 400 : 0;
-    return free_dram_size_mb;
+    long long free_dram_size_mb = free_dram_size / 1048576; // Convert bytes to MB
+    free_dram_size_mb = (free_dram_size_mb > RESERVED_MEMORY_MB) ? free_dram_size_mb - RESERVED_MEMORY_MB : 0;
+    return (int)free_dram_size_mb;
 }
 
 // return code:
@@ -4527,7 +4386,7 @@ int trigger_bk()
             fprintf(stderr, "Start triggering scan\n");
             return 1;
         }
-        // free_dram_size_mb -= 400; // reserve 400mb for safety
+
         fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, free_dram_size_mb);
         usleep(500000);
     }
@@ -4805,7 +4664,7 @@ void *manual_trigger_scan(void *arg)
         //     double deleted_in_all = (double)not_in_global_set / old_num_op;
         //     if (deleted_in_all > 0.9)
         //     {
-        //         fprintf(stderr, "most op are deleted, rollback to slow\n");
+        //         fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
         //         usleep(2000000);
         //         fast_scan_idx = -2; // a lot of op are deleted, rollback to slow
         //     }
