@@ -42,6 +42,7 @@ extern "C"
     void get_page_hotness_bound(short *min, short *max);
     void print_all_pages_hotness();
     void reset_pages_hotness();
+    void set_location_pages(uintptr_t page, bool location);
 
 #ifdef __cplusplus
 }

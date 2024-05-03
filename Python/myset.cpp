@@ -214,14 +214,14 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
             *demote_pages = (void *)it->first; // Store the pointer at the memory location
             demote_pages++;                    // Move the pointer to the next memory location
             (*demo_size)++;                    // Increment the value stored at the memory location
-            it->second.second = 1;
+            // it->second.second = 1;
         }
         else if (it->second.first >= split && it->second.second) // Most sig bit: 0(positive) hot dominant && in CXL
         {
             *promote_pages = (void *)it->first; // Store the pointer at the memory location
             promote_pages++;                    // Move the pointer to the next memory location
             (*promo_size)++;                    // Increment the value stored at the memory location
-            it->second.second = 0;
+            // it->second.second = 0;
         }
     }
 }
@@ -237,7 +237,7 @@ extern "C" void populate_mig_pages_wo_checking(void **demote_pages, void **promo
             demote_pages++;                    // Move the pointer to the next memory location
             (*demo_size)++;                    // Increment the value stored at the memory location
             // it->second |= (1 << 30);   // mark in CXL
-            it->second.second = 1;
+            // it->second.second = 1;
         }
         else if (it->second.first >= split) // Most sig bit: 0(positive) hot dominant && in CXL
         {
@@ -245,7 +245,7 @@ extern "C" void populate_mig_pages_wo_checking(void **demote_pages, void **promo
             promote_pages++;                    // Move the pointer to the next memory location
             (*promo_size)++;                    // Increment the value stored at the memory location
             // it->second &= ~(1 << 30);   // mark in DRAM
-            it->second.second = 0;
+            // it->second.second = 0;
         }
     }
 }
@@ -288,5 +288,17 @@ extern "C" void reset_pages_hotness()
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         it->second.first = 0;
+    }
+}
+
+extern "C" void set_location_pages(uintptr_t page, bool location)
+{
+    auto it = map_pair.find(page);
+    if (it != map_pair.end())
+    {
+        if (location)
+            it->second.second = 1;
+        else
+            it->second.second = 0;
     }
 }

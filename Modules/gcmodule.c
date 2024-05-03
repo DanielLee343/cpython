@@ -3612,6 +3612,11 @@ double do_migration(void **pages, int num_pages, int dest_node)
         }
     }
     fprintf(stderr, "not_moved: %d\n", not_moved);
+    // populate page location here
+    for (int i = 0; i < num_pages; i++)
+    {
+        set_location_pages((uintptr_t)pages[i], dest_node);
+    }
     free(pages);
     free(nodes);
     free(status);
