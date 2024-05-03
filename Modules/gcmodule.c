@@ -40,11 +40,6 @@
 
 #include "myset.h"
 #include "kh_set_wrap.h"
-pthread_mutex_t mutex;
-pthread_mutexattr_t attr;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_slow = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond_fast = PTHREAD_COND_INITIALIZER;
 static double total_cur_cascading_time = 0.0;
 static int total_num_slow = 0;
 unsigned long global_try2_sched = 0;
@@ -116,26 +111,9 @@ typedef struct cur_survived_node
     struct cur_survived_node *next, *prev;
 } cur_survived_node;
 
-int allow_fast = 0;
-int allow_slow = 0;
 PyGC_Head *global_old;
 static int gen_idx = -1;
 int check_dram_free();
-// sigjmp_buf jump_buffer;
-// void sigsegv_handler(int sig)
-// {
-//     fprintf(stderr, "Caught segmentation fault, jumping to recovery point...\n");
-//     siglongjmp(jump_buffer, 1);
-// }
-// void enable_sigsegv_handler()
-// {
-//     struct sigaction sa;
-//     memset(&sa, 0, sizeof(sa));
-//     sa.sa_flags = SA_SIGINFO;
-//     sa.sa_handler = sigsegv_handler;
-//     sigemptyset(&sa.sa_mask);
-//     sigaction(SIGSEGV, &sa, NULL);
-// }
 
 typedef struct
 {
@@ -1604,28 +1582,27 @@ double try_cascading_old(int slow_idx)
 
 int gen_temps()
 {
-    clock_t t = clock();
     unsigned int num_op = 0;
     if (!all_temps) // first time populate
     {
         // first time / reset metadata --> malloc
-        free(all_temps);
         num_op = kv_size(local_ptr_vec);
-        all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
+        // all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
+        all_temps = (OBJ_TEMP *)numa_alloc_onnode(num_op * sizeof(OBJ_TEMP), 1); // allocate metadata to CXL
         if (all_temps == NULL)
         {
             fprintf(stderr, "Failed to allocate memory for all ops\n");
             return 0;
         }
+        memset(all_temps, 0, num_op * sizeof(OBJ_TEMP));
         for (int i = 0; i < num_op; i++)
         {
             all_temps[i].op = kv_A(local_ptr_vec, i);
-            all_temps[i].prev_refcnt = 0;
+            // all_temps[i].prev_refcnt = 0;
             // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
         }
         old_num_op = num_op;
         fprintf(stderr, "first time appended %u nodes\n", num_op);
-        fprintf(stderr, "forming all_temp time: %.3f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
         return 1;
     }
     else
@@ -1634,11 +1611,13 @@ int gen_temps()
         num_op = kv_size(local_ptr_vec);
         prev_num_op = old_num_op;
         unsigned int new_num_op = num_op + old_num_op;
-        OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
+        // OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
+        OBJ_TEMP *temp = (OBJ_TEMP *)numa_realloc(all_temps, old_num_op * sizeof(OBJ_TEMP), new_num_op * sizeof(OBJ_TEMP));
         if (temp == NULL)
         {
             fprintf(stderr, "Failed to realloc\n");
-            free(all_temps);
+            // free(all_temps);
+            numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
             return 0;
         }
         all_temps = temp;
@@ -1646,11 +1625,13 @@ int gen_temps()
         {
             all_temps[i].op = kv_A(local_ptr_vec, i - old_num_op);
             all_temps[i].prev_refcnt = 0;
-            // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
+            for (int i = 0; i < 8; i++)
+            {
+                all_temps[i].diffs[i] = 0;
+            }
         }
         old_num_op = new_num_op;
         fprintf(stderr, "newly appended: %u, total: %u\n", num_op, old_num_op);
-        fprintf(stderr, "forming all_temp time: %.3f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
         return 2;
     }
 }
@@ -1693,29 +1674,8 @@ static int try_trigger_slow_scan()
     double elapsed;
     struct timespec start, end;
     int ret;
-
-    // fprintf(stderr, "entering trigger slow scan...\n");
-    // if (!enable_bk)
-    //     return -1; // this would never happens
-    // double durationInSeconds = (double)time_since_gc_triggerd / CLOCKS_PER_SEC;
-    // fprintf(stderr, "time_since_gc_triggerd: %ld, durationInSeconds: %.3f, get_live_time_thresh: %ld\n", time_since_gc_triggerd, durationInSeconds, get_live_time_thresh);
-    // if (time_since_gc_triggerd > get_live_time_thresh) // current: 1s, is a good threshold?
-    // if (num_gc_cycles <= 5)
-    // {
-    //     fprintf(stderr, "skipping slow...\n");
-    //     num_gc_cycles = 0;
-    //     return 0;
-    // }
     unsigned int cur_global_size = get_global_size();
-    // unsigned int cur_global_size = get_map_size();
-
-    // unsigned int cur_global_size = get_global_kh_size();
     fprintf(stderr, "num_gc_cycles: %ld\n", num_gc_cycles);
-    // PyGILState_STATE gstate = PyGILState_Ensure();
-    // PyThreadState *tstate = _PyThreadState_GET();
-    // PyInterpreterState *interp = tstate->interp;
-    // GCState *gcstate = &interp->gc;
-    // PyGILState_Release(gstate);
     fprintf(stderr, "global_try2_sched: %ld\n", global_try2_sched);
     fprintf(stderr, "recent num_container_collected: %lu, global size: %d\n", num_container_collected, cur_global_size);
     double div = (double)old_num_op / cur_global_size;
@@ -1754,22 +1714,6 @@ static int try_trigger_slow_scan()
     {
         fprintf(stderr, "free and reset metadata\n");
         clock_gettime(CLOCK_MONOTONIC, &start);
-        // PyGILState_STATE reset_gil = PyGILState_Ensure();
-        // for (unsigned int i = 0; i < old_num_op; i++)
-        // {
-        //     uintptr_t casted_op = (uintptr_t)all_temps[i].op;
-        //     if (check_in_map(casted_op))
-        //     {
-        //         if (all_temps[i].diffs[7] & (1 << LOCATION_OFF))
-        //         {
-        //             insert_into_map(casted_op, 1);
-        //         }
-        //         else
-        //         {
-        //             insert_into_map(casted_op, 0);
-        //         }
-        //     }
-        // }
         reset_all_temps();
         // PyGILState_Release(reset_gil);
         clock_gettime(CLOCK_MONOTONIC, &end);
@@ -1779,17 +1723,6 @@ static int try_trigger_slow_scan()
         ret = 1; // all_temps reformed
         goto reset_and_return;
     }
-
-    // if (num_container_collected == 0 || num_container_collected < cur_global_size)
-    // {
-    //     fprintf(stderr, "noneed\n");
-    //     need2_check_set = 0;
-    // }
-    // else
-    // {
-    //     fprintf(stderr, "yesneed\n");
-    //     need2_check_set = 1;
-    // }
 
     if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000)) // if either newly created container_op or recently connected op is small, then just skip slow
     {
@@ -1819,9 +1752,14 @@ static int try_trigger_slow_scan()
     }
     else
     {
+        clock_gettime(CLOCK_MONOTONIC, &start);
         ret = gen_temps(); // 0. error, 1. reset all_temps, 2. realloc (append) to all_temps
         if (!ret)
             fprintf(stderr, "\nerror\n");
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        elapsed = end.tv_sec - start.tv_sec;
+        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+        fprintf(stderr, "gen_temps time: %.3f\n", elapsed);
     }
     fprintf(stderr, "cur_global_size: %d, old_num_op: %d\n", cur_global_size, old_num_op);
 
@@ -3635,7 +3573,10 @@ void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundary
 double do_migration(void **pages, int num_pages, int dest_node)
 {
     int *nodes = calloc(num_pages, sizeof(int));
+    // int *nodes = numa_alloc_onnode(num_pages * sizeof(int), 1);
     int *status = calloc(num_pages, sizeof(int));
+    // int *status = numa_alloc_onnode(num_pages * sizeof(int), 1);
+    memset(status, 0, num_pages * sizeof(int));
     if (dest_node == 0)
     {
         // promotion, to DRAM
@@ -3674,6 +3615,9 @@ double do_migration(void **pages, int num_pages, int dest_node)
     free(pages);
     free(nodes);
     free(status);
+    // numa_free(pages, num_pages * sizeof(void *));
+    // numa_free(nodes, num_pages * sizeof(int));
+    // numa_free(status, num_pages * sizeof(int));
     return elapsed;
 }
 
@@ -3925,6 +3869,8 @@ double try_trigger_migration_revised(int rescan_thresh)
     int demo_size = 0, promo_size = 0;
     void **demote_pages = calloc(max_size, sizeof(void *));
     void **promote_pages = calloc(max_size, sizeof(void *));
+    // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 1);
+    // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 1);
 
     if (very_first_mig)
     {
@@ -3950,6 +3896,7 @@ double try_trigger_migration_revised(int rescan_thresh)
     else
     {
         free(demote_pages);
+        // numa_free(demote_pages, max_size * sizeof(void *));
         demote_pages = NULL;
     }
 
@@ -3970,6 +3917,7 @@ double try_trigger_migration_revised(int rescan_thresh)
     else
     {
         free(promote_pages);
+        // numa_free(promote_pages, max_size * sizeof(void *));
         promote_pages = NULL;
     }
     fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
@@ -4427,7 +4375,6 @@ void *manual_trigger_scan(void *arg)
         get_live_time_thresh = global_bookkeep_args->live_time_thresh_arg;
     }
     migration_time_thresh = 2000000; // 2s, thus, trigger migration by default
-    allow_slow = 1;
     fprintf(stderr, "trigger from manual\n");
     int rescan_thresh = global_bookkeep_args->rescan_thresh;
     rescan_thresh_glb = rescan_thresh;
@@ -4439,13 +4386,13 @@ void *manual_trigger_scan(void *arg)
     uintptr_t no_93_upper = 100000000000000;
     int trigger_drop_thresh = 50; // percentage
     bool do_drop_unhot_op;
-    clock_t cur_fast_start, cur_fast_end;
     long temp_diff = 0;
     double total_migration_time = 0;
     double total_fast_time = 0.0;
     int total_fast_num = 0;
     int reset_all_temps = 1;
     last_demote_pages = kh_init(ptrset_dup);
+    struct timespec start_fast, end_fast;
     // int scan_stat = 0;
     // while (!terminate_flag_refchain)
     // {
@@ -4458,13 +4405,6 @@ void *manual_trigger_scan(void *arg)
         // {
         //     break;
         // }
-        // pthread_mutex_lock(&mutex);
-        // while (allow_fast != 1)
-        // {
-        //     fprintf(stderr, "waiting fast to be signaled\n");
-        //     pthread_cond_wait(&cond_fast, &mutex); // wait for cond_fast to be signaled
-        // }
-        // allow_slow = 0;
         zero_hot_num = 0;
         cur_fast_num_hot = 0; // reset for every fast scan
         not_in_global_set = 0;
@@ -4478,10 +4418,7 @@ void *manual_trigger_scan(void *arg)
             }
             fast_scan_idx = 0; // start fast scan
         }
-        // do fast in here
-        // PyGILState_STATE gstate4_safety = PyGILState_Ensure();
-        // goto skip_fast_scans;
-        cur_fast_start = clock();
+        clock_gettime(CLOCK_MONOTONIC, &start_fast);
         if (fast_scan_idx == 0)
         {
             if (reset_all_temps == 1)
@@ -4653,10 +4590,10 @@ void *manual_trigger_scan(void *arg)
         {
             record_temp(fast_scan_idx, rescan_thresh, old_num_op);
         }
-        cur_fast_end = clock();
         fprintf(stderr, "cur_fast_num_hot: %ld, zero_hot_num: %d, not_in_global_set: %ld\n", cur_fast_num_hot, zero_hot_num, not_in_global_set);
-        // PyGILState_Release(gstate4_safety);
-        double cur_fast_time = ((double)(cur_fast_end - cur_fast_start)) / CLOCKS_PER_SEC;
+        clock_gettime(CLOCK_MONOTONIC, &end_fast);
+        double cur_fast_time = end_fast.tv_sec - start_fast.tv_sec;
+        cur_fast_time += (end_fast.tv_nsec - start_fast.tv_nsec) / 1000000000.0;
         fprintf(stderr, "fast %d, cur_fast_time: %.3f\n", fast_scan_idx, cur_fast_time);
         total_fast_time += cur_fast_time;
         if (fast_scan_idx != -1)
@@ -4667,22 +4604,22 @@ void *manual_trigger_scan(void *arg)
         cur_hot_in_all = (double)max_num_hot / old_num_op;
         fprintf(stderr, "cur_hot_in_all: %.3f\n", cur_hot_in_all);
         // relaxed fast
-        if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
-        {
-            // double deleted_in_all = (double)not_in_global_set / old_num_op;
-            // if (deleted_in_all > 0.9)
-            // {
-            //     fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
-            //     usleep(2000000);
-            //     fast_scan_idx = -2; // a lot of op are deleted, rollback to slow
-            // }
-            if (cur_hot_in_all < 0.01) // limited # changed op, OR, similar # hot, relax fast trace
-            {
-                fprintf(stderr, "small # changed, rollback to slow...\n");
-                usleep(2000000);
-                // fast_scan_idx = -2;
-            }
-        }
+        // if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
+        // {
+        // double deleted_in_all = (double)not_in_global_set / old_num_op;
+        // if (deleted_in_all > 0.9)
+        // {
+        //     fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
+        //     usleep(2000000);
+        //     fast_scan_idx = -2; // a lot of op are deleted, rollback to slow
+        // }
+        // if (cur_hot_in_all < 0.01) // limited # changed op, OR, similar # hot, relax fast trace
+        // {
+        //     fprintf(stderr, "small # changed, rollback to slow...\n");
+        //     usleep(2000000);
+        //     // fast_scan_idx = -2;
+        // }
+        // }
         if (very_first_bk)
             very_first_bk = false;
 
@@ -4737,23 +4674,23 @@ void *manual_trigger_scan(void *arg)
                 PyGILState_Release(gstate);
             }
         }
-        // allow_slow = 1;
-        // pthread_cond_signal(&cond_slow); // Signal fast scan, if any
-        // pthread_mutex_unlock(&mutex);
     skip_fast_scans:
-        usleep(global_bookkeep_args->sample_dur);
-        // usleep(1000000);
+        if (cur_fast_time > 2.5 && cur_hot_in_all < 0.05)
+        {
+            fprintf(stderr, "relaxed fast, sleep longer\n");
+            usleep(global_bookkeep_args->sample_dur * 2);
+        }
+        else
+            usleep(global_bookkeep_args->sample_dur);
     }
     terminate_flag_refchain = 0;
     enable_bk = 0;
     fprintf(stderr, "total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_cur_cascading_time, total_migration_time);
-    free(all_temps);
+    // free(all_temps);
+    numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
     kh_destroy(ptrset_dup, last_demote_pages);
     // free_map();
     free_global();
     free_pages();
     // destroy_global_set_helper();
-    // pthread_mutex_destroy(&mutex);
-    // pthread_cond_destroy(&cond_slow);
-    // pthread_cond_destroy(&cond_fast);
 }
