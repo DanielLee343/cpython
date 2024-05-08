@@ -82,7 +82,7 @@ MAKESETUP=      $(srcdir)/Modules/makesetup
 OPT=		@OPT@
 BASECFLAGS=	@BASECFLAGS@
 BASECPPFLAGS=	@BASECPPFLAGS@
-CONFIGURE_CFLAGS=	@CFLAGS@ -I/home/lyuze/workspace/klib
+CONFIGURE_CFLAGS=	@CFLAGS@ -I$${HOME}/workspace/klib
 # CFLAGS_NODIST is used for building the interpreter and stdlib C extensions.
 # Use it when a compiler flag should _not_ be part of the distutils CFLAGS
 # once Python is installed (Issue #21121).
