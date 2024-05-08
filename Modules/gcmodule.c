@@ -1539,7 +1539,6 @@ double try_cascading_old(int slow_idx)
                 update_recursive_visitor(container_op, &combined); // cascading
             }
         }
-    early_stop:
         // early_return = false;
         // gen_id_bound[i].low = local_lowest_op;
     }
@@ -3226,7 +3225,6 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
             // clock_gettime(CLOCK_MONOTONIC, &cutoff_start);
             // return;
             early_return = true;
-            // goto early_stop;
         }
     }
     traverse(each_op, (visitproc)cascadingvisitor, combined);
