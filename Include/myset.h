@@ -30,7 +30,7 @@ extern "C"
     unsigned int get_map_size();
 
     // pages_loc_hotness
-    void insert_into_pages(uintptr_t page_addr, bool is_hot, short hotness);
+    void insert_into_pages(uintptr_t page_addr, short hotness);
     int check_in_pages(uintptr_t page);
     void erase_from_pages(uintptr_t page);
     void free_pages();

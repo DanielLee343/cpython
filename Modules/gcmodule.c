@@ -3221,9 +3221,8 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
         double elapsed_ = (cutoff_current.tv_sec - cutoff_start.tv_sec) + (cutoff_current.tv_nsec - cutoff_start.tv_nsec) / 1.0e9;
         if (elapsed_ > cutoff_limit)
         {
-            fprintf(stderr, "Early stop, elapsed_: %.3f, counter: %d, cutoff_limit: %.3f\n", elapsed_, cutoff_counter, cutoff_limit);
-            // clock_gettime(CLOCK_MONOTONIC, &cutoff_start);
-            // return;
+            cutoff_limit *= 2;
+            fprintf(stderr, "Early stop, elapsed_: %.3f, counter: %d, cutoff_limit update: %.3f\n", elapsed_, cutoff_counter, cutoff_limit);
             early_return = true;
         }
     }
@@ -3455,17 +3454,6 @@ int comparePageCount(const void *a, const void *b)
     return ((PageCount *)b)->count - ((PageCount *)a)->count;
 }
 
-// void align_obj_2_page_bd_sort_by_num_objs(unsigned int num_op, uintptr_t *op_hotness_arr, bool is_hot)
-// {
-//     if (!op_hotness_arr || num_op == 0)
-//         return;
-//     sortRawAddr_masked(op_hotness_arr, num_op);
-//     for (unsigned int i = 0; i < num_op; i++)
-//     {
-//         insert_into_pages((op_hotness_arr[i] & PAGE_MASK), is_hot);
-//     }
-//     free(op_hotness_arr);
-// }
 void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end_idx, bool is_hot)
 {
     if (end_idx == 0)
@@ -3482,7 +3470,7 @@ void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end
         {
             short cur_op_hotness = 2;
             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-            insert_into_pages(masked_addr, is_hot, cur_op_hotness);
+            insert_into_pages(masked_addr, cur_op_hotness);
         }
     }
     else
@@ -3491,8 +3479,22 @@ void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end
         {
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-            insert_into_pages(masked_addr, is_hot, cur_op_hotness);
+            insert_into_pages(masked_addr, cur_op_hotness);
         }
+    }
+}
+
+void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
+{
+    if (end_idx == 0)
+    {
+        fprintf(stderr, "unlikely, error\n");
+        return;
+    }
+    for (unsigned int i = start_idx; i < end_idx; i++)
+    {
+        short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+        insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
     }
 }
 
@@ -3547,7 +3549,7 @@ bool very_first_mig = true;
 khash_t(ptrset_dup) * last_demote_pages; // for lazy demotion
 khash_t(ptrset_dup) * dupped_pages;      // for testing dupped migration
 double prev_c_w_percent = 0.0;
-double try_trigger_migration_revised()
+double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_idx)
 {
     // dupped_pages = kh_init(ptrset_dup);
     struct timespec start, end;
@@ -3568,11 +3570,11 @@ double try_trigger_migration_revised()
         clock_gettime(CLOCK_MONOTONIC, &start);
         // cppDefaultSortAsc(all_temps, old_num_op);
         // sort_dnf(&cold_warm_idx, &warm_hot_idx, &high);
-        for (int i = 0; i < old_num_op; i++)
-        {
-            if (!(all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK))
-                cold_warm_idx++;
-        }
+        // for (int i = start_idx; i < end_idx; i++)
+        // {
+        //     if (!(all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK))
+        //         cold_warm_idx++;
+        // }
         clock_gettime(CLOCK_MONOTONIC, &end);
         elapsed = end.tv_sec - start.tv_sec;
         elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
@@ -3582,12 +3584,12 @@ double try_trigger_migration_revised()
     // |   cold   |        warm     |        hot       |
     // (<-----domote candidates---->)(promote candidates)
     // 0    cold_warm_idx      warm_hot_idx   old_num_op
-    unsigned int expected_num_cold = cold_warm_idx;
-    unsigned int expected_num_hot = old_num_op - expected_num_cold;
-    // under the following situation, no need to demote
-    fprintf(stderr, "expected_num_hot: %d, expected_num_cold: %d\n", expected_num_hot, expected_num_cold);
-    double cur_c_w_percent = (double)expected_num_cold / old_num_op;
-    uint8_t hotness;
+    // unsigned int expected_num_cold = cold_warm_idx;
+    // unsigned int expected_num_hot = old_num_op - expected_num_cold;
+    // // under the following situation, no need to demote
+    // fprintf(stderr, "expected_num_hot: %d, expected_num_cold: %d\n", expected_num_hot, expected_num_cold);
+    // double cur_c_w_percent = (double)expected_num_cold / old_num_op;
+    // uint8_t hotness;
 
     // demote to CXL
     // if (fabs(cur_c_w_percent - prev_c_w_percent) < 0.01 && is_old_num_remain_still())
@@ -3595,20 +3597,19 @@ double try_trigger_migration_revised()
     //     fprintf(stderr, "relax domotion\n");
     // }
     // else
-    if (expected_num_cold > 0)
-    { // get cold page candidate
-        align_obj_2_page_bd_from_all_temps(0, expected_num_cold, 0);
-    }
-    if (expected_num_hot > 0)
-    {
-        align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
-    }
-    // populate demote_pages and promote_pages
-    short min_hotness, max_hotness;
-    get_page_hotness_bound(&min_hotness, &max_hotness);
-    // print_all_pages_hotness();
-    // short split = (min_hotness + max_hotness) / 2;
-    // short split = min_hotness + 10; //?
+    // if (expected_num_cold > 0)
+    // { // get cold page candidate
+    //     align_obj_2_page_bd_from_all_temps(0, expected_num_cold, 0);
+    // }
+    // if (expected_num_hot > 0)
+    // {
+    //     align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
+    // }
+    align_obj_2_page_bd_revised(start_idx, end_idx);
+
+    // short min_hotness, max_hotness;
+    // get_page_hotness_bound(&min_hotness, &max_hotness);
+
     short split = 1; // < split: cold, >= split, hot
     unsigned int max_size = get_pages_size();
     int demo_size = 0, promo_size = 0;
@@ -3674,7 +3675,7 @@ double try_trigger_migration_revised()
     }
     fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
 
-    prev_c_w_percent = cur_c_w_percent; // remember to update prev_c_w_percent for next try_migration
+    // prev_c_w_percent = cur_c_w_percent; // remember to update prev_c_w_percent for next try_migration
     if (very_first_mig)
         very_first_mig = false;
     if (forced_promo)
@@ -3748,7 +3749,7 @@ void *manual_trigger_scan(void *arg)
     global_bookkeep_args = (BookkeepArgs *)arg;
     if (!global_bookkeep_args->cutoff_limit)
     {
-        cutoff_limit = 0.5;
+        cutoff_limit = 2;
     }
     else
     {
@@ -3983,10 +3984,16 @@ void *manual_trigger_scan(void *arg)
         if (very_first_bk)
             very_first_bk = false;
 
+        if (fast_scan_idx == 3)
+        {
+            fprintf(stderr, "migration from 0 to %u\n", partition * 4);
+            total_migration_time += try_trigger_migration_revised(0, partition * 4);
+        }
+
         if (++fast_scan_idx >= NUM_SLOTS - 1)
         {
             fast_scan_idx = -1; // roll back to slow scan
-            fprintf(stderr, "a bunch of fasts finished, try trigger migration...\n");
+            fprintf(stderr, "migration from %u to %u\n", partition * 4, partition * 7);
             // force promotion
             // if (old_num_op > 1000000 && cur_hot_in_all < 0.1)
             // {
@@ -3994,7 +4001,7 @@ void *manual_trigger_scan(void *arg)
             //     forced_promo = true;
             // }
 
-            cur_mig_time = try_trigger_migration_revised();
+            cur_mig_time = try_trigger_migration_revised(partition * 4, partition * 7);
             total_migration_time += cur_mig_time;
             max_num_hot = 0;
             if (doIO_)
