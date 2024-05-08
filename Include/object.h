@@ -454,7 +454,7 @@ check by comparing the reference count field to the immortality reference count.
         unsigned int doIO;
         int rescan_thresh;
         PyThreadState *mainThreadState;
-        unsigned int live_time_thresh_arg;
+        unsigned int cutoff_limit;
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
 

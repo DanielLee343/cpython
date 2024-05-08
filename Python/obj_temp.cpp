@@ -8,14 +8,13 @@
 #include <execution>
 #include <setjmp.h>
 
-extern int rescan_thresh_glb;
 OBJ_TEMP *all_temps = NULL;
 
 extern "C" void cppDefaultSortAsc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diffs[rescan_thresh_glb] & 0x3FFF) > (a.diffs[rescan_thresh_glb] & 0x3FFF); // Sort asc
+                  return (b.diffs[7] & 0x3F) > (a.diffs[7] & 0x3F); // Sort asc
               });
 }
 
@@ -23,7 +22,7 @@ extern "C" void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diffs[rescan_thresh_glb] & 0x3FFF) < (a.diffs[rescan_thresh_glb] & 0x3FFF); // Sort desc
+                  return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); // Sort desc
               });
 }
 
@@ -31,7 +30,7 @@ extern "C" void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n)
 // {
 //     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
 //               {
-//                   return (b.diffs[rescan_thresh_glb] & 0x3FFF) < (a.diffs[rescan_thresh_glb] & 0x3FFF); // Sort desc, only top k
+//                   return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); // Sort desc, only top k
 //               });
 // }
 
@@ -39,7 +38,7 @@ extern "C" void cppParallelSort(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(
         std::execution::par, all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
-        { return (b.diffs[rescan_thresh_glb] & 0x3FFF) < (a.diffs[rescan_thresh_glb] & 0x3FFF); });
+        { return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); });
 }
 
 // sort the addr in ascending order

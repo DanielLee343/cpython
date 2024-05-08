@@ -6,11 +6,12 @@
 
 #define PAGE_SIZE_ 4096
 #define PAGE_MASK_ (~(PAGE_SIZE_ - 1))
+#define NUM_SLOTS 8
 typedef struct
 {
     PyObject *op;             // 8
     unsigned int prev_refcnt; // 4
-    uint8_t diffs[8];         // 8
+    uint8_t diffs[NUM_SLOTS];         // 8
     // size_t cur_sizeof; // 8, but no need for now
 } OBJ_TEMP;
 
@@ -24,7 +25,6 @@ extern "C"
     void cppParallelSort(OBJ_TEMP *all_temps, size_t n);
     void sortRawAddr(uintptr_t *ptr, size_t n);
     void sortRawAddr_masked(uintptr_t *ptr, size_t n);
-    void record_temp_cpp(int scan_idx, int rescan_thresh, unsigned int num_total);
     // void register_sigsegv(void);
     // void enable_sigsegv_handler(void);
 

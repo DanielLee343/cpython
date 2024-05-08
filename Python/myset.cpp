@@ -124,13 +124,6 @@ extern "C" void reset_all_temps_map()
     }
     old_num_op = new_num_op;
 }
-uintptr_t reconstruct_page(uintptr_t value)
-{
-    uintptr_t mask = 0x00FFFFFFFFFF;              // Mask to clear the top 8 bits
-    uintptr_t clearedValue = value & mask;        // Clear the top 8 bits of the input value
-    uintptr_t newValue = ((uintptr_t)0x7F) << 40; // Set the top 8 bits to 0x7F
-    return clearedValue | newValue;               // Combine the cleared value with the new top bits
-}
 // pages_loc_hotness
 // map_pair
 extern "C" void insert_into_pages(uintptr_t page_addr, bool is_hot, short hotness)
@@ -143,7 +136,8 @@ extern "C" void insert_into_pages(uintptr_t page_addr, bool is_hot, short hotnes
     }
     else
     {
-        map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
+        // map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
+        map_pair[page_addr] = std::make_pair(is_hot ? hotness : 0, false);
     }
 }
 
@@ -209,14 +203,14 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         // int processed = process_signed_value(it->second);
-        if (it->second.first < split && !it->second.second) // Most sig bit: 1(negative) cold dominant && in DRAM
+        if (it->second.first < split && !it->second.second)
         {
             *demote_pages = (void *)it->first; // Store the pointer at the memory location
             demote_pages++;                    // Move the pointer to the next memory location
             (*demo_size)++;                    // Increment the value stored at the memory location
             // it->second.second = 1;
         }
-        else if (it->second.first >= split && it->second.second) // Most sig bit: 0(positive) hot dominant && in CXL
+        else if (it->second.first >= split && it->second.second)
         {
             *promote_pages = (void *)it->first; // Store the pointer at the memory location
             promote_pages++;                    // Move the pointer to the next memory location
@@ -300,5 +294,7 @@ extern "C" void set_location_pages(uintptr_t page, bool location)
             it->second.second = 1;
         else
             it->second.second = 0;
+        // clear hotness
+        it->second.first = 0;
     }
 }
