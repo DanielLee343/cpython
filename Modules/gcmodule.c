@@ -1558,8 +1558,8 @@ int gen_temps()
     {
         // first time / reset metadata --> malloc
         num_op = kv_size(local_ptr_vec);
-        // all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
-        all_temps = (OBJ_TEMP *)numa_alloc_onnode(num_op * sizeof(OBJ_TEMP), 0); // allocate metadata to DRAM
+        all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
+        // all_temps = (OBJ_TEMP *)numa_alloc_onnode(num_op * sizeof(OBJ_TEMP), 0); // allocate metadata to DRAM
         if (all_temps == NULL)
         {
             fprintf(stderr, "Failed to allocate memory for all ops\n");
@@ -1582,13 +1582,13 @@ int gen_temps()
         num_op = kv_size(local_ptr_vec);
         prev_num_op = old_num_op;
         unsigned int new_num_op = num_op + old_num_op;
-        // OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
-        OBJ_TEMP *temp = (OBJ_TEMP *)numa_realloc(all_temps, old_num_op * sizeof(OBJ_TEMP), new_num_op * sizeof(OBJ_TEMP));
+        OBJ_TEMP *temp = (OBJ_TEMP *)realloc(all_temps, new_num_op * sizeof(OBJ_TEMP));
+        // OBJ_TEMP *temp = (OBJ_TEMP *)numa_realloc(all_temps, old_num_op * sizeof(OBJ_TEMP), new_num_op * sizeof(OBJ_TEMP));
         if (temp == NULL)
         {
             fprintf(stderr, "Failed to realloc\n");
-            // free(all_temps);
-            numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
+            free(all_temps);
+            // numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
             return 0;
         }
         all_temps = temp;
@@ -3362,10 +3362,10 @@ void sort_dnf(int *low, int *mid, int *high)
 
 double do_migration(void **pages, int num_pages, int dest_node)
 {
-    // int *nodes = calloc(num_pages, sizeof(int));
-    int *nodes = numa_alloc_onnode(num_pages * sizeof(int), 0);
-    // int *status = calloc(num_pages, sizeof(int));
-    int *status = numa_alloc_onnode(num_pages * sizeof(int), 0);
+    int *nodes = calloc(num_pages, sizeof(int));
+    // int *nodes = numa_alloc_onnode(num_pages * sizeof(int), 0);
+    int *status = calloc(num_pages, sizeof(int));
+    // int *status = numa_alloc_onnode(num_pages * sizeof(int), 0);
     memset(status, 0, num_pages * sizeof(int));
     if (dest_node == 0)
     {
@@ -3407,12 +3407,12 @@ double do_migration(void **pages, int num_pages, int dest_node)
     {
         set_location_pages((uintptr_t)pages[i], dest_node);
     }
-    // free(pages);
-    // free(nodes);
-    // free(status);
-    numa_free(pages, num_pages * sizeof(void *));
-    numa_free(nodes, num_pages * sizeof(int));
-    numa_free(status, num_pages * sizeof(int));
+    free(pages);
+    free(nodes);
+    free(status);
+    // numa_free(pages, num_pages * sizeof(void *));
+    // numa_free(nodes, num_pages * sizeof(int));
+    // numa_free(status, num_pages * sizeof(int));
     return elapsed;
 }
 
@@ -3612,10 +3612,10 @@ double try_trigger_migration_revised()
     short split = 1; // < split: cold, >= split, hot
     unsigned int max_size = get_pages_size();
     int demo_size = 0, promo_size = 0;
-    // void **demote_pages = calloc(max_size, sizeof(void *));
-    // void **promote_pages = calloc(max_size, sizeof(void *));
-    void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
-    void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
+    void **demote_pages = calloc(max_size, sizeof(void *));
+    void **promote_pages = calloc(max_size, sizeof(void *));
+    // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
+    // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
 
     if (very_first_mig)
     {
@@ -3631,15 +3631,17 @@ double try_trigger_migration_revised()
     if (demo_size > 0)
     {
         if (demo_size < max_size)
-            demote_pages = (void **)numa_realloc(demote_pages, max_size * sizeof(void *), demo_size * sizeof(void *));
-        // demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+        {
+            // demote_pages = (void **)numa_realloc(demote_pages, max_size * sizeof(void *), demo_size * sizeof(void *));
+            demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+        }
         cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // demote to CXL
         is_migration = true;
     }
     else
     {
-        // free(demote_pages);
-        numa_free(demote_pages, max_size * sizeof(void *));
+        free(demote_pages);
+        // numa_free(demote_pages, max_size * sizeof(void *));
         demote_pages = NULL;
     }
     // resize promo size if DRAM is scarce
@@ -3657,15 +3659,17 @@ double try_trigger_migration_revised()
         }
 
         if (promo_size < max_size)
-            promote_pages = (void **)numa_realloc(promote_pages, max_size * sizeof(void *), promo_size * sizeof(void *));
-        // promote_pages = realloc(promote_pages, promo_size * sizeof(void *));
+        {
+            // promote_pages = (void **)numa_realloc(promote_pages, max_size * sizeof(void *), promo_size * sizeof(void *));
+            promote_pages = realloc(promote_pages, promo_size * sizeof(void *));
+        }
         cur_migration_time += do_migration(promote_pages, promo_size, DRAM_MASK); // promote to DRAM
         is_migration = true;
     }
     else
     {
-        // free(promote_pages);
-        numa_free(promote_pages, max_size * sizeof(void *));
+        free(promote_pages);
+        // numa_free(promote_pages, max_size * sizeof(void *));
         promote_pages = NULL;
     }
     fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
@@ -4045,8 +4049,8 @@ void *manual_trigger_scan(void *arg)
     terminate_flag_refchain = 0;
     enable_bk = 0;
     fprintf(stderr, "total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_cur_cascading_time, total_migration_time);
-    // free(all_temps);
-    numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
+    free(all_temps);
+    // numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
     kh_destroy(ptrset_dup, last_demote_pages);
     // free_map();
     free_global();
