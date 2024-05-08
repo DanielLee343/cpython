@@ -4,8 +4,6 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <csignal>
-// for parallel sort
-#include <execution>
 #include <setjmp.h>
 
 OBJ_TEMP *all_temps = NULL;
@@ -33,13 +31,6 @@ extern "C" void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n)
 //                   return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); // Sort desc, only top k
 //               });
 // }
-
-extern "C" void cppParallelSort(OBJ_TEMP *all_temps, size_t n)
-{
-    std::sort(
-        std::execution::par, all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
-        { return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); });
-}
 
 // sort the addr in ascending order
 extern "C" void sortRawAddr(uintptr_t *ptr, size_t n)

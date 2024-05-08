@@ -11,7 +11,7 @@ typedef struct
 {
     PyObject *op;             // 8
     unsigned int prev_refcnt; // 4
-    uint8_t diffs[NUM_SLOTS];         // 8
+    uint8_t diffs[NUM_SLOTS]; // 8
     // size_t cur_sizeof; // 8, but no need for now
 } OBJ_TEMP;
 
@@ -22,7 +22,6 @@ extern "C"
 
     void cppDefaultSortAsc(OBJ_TEMP *all_temps, size_t n);
     void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n);
-    void cppParallelSort(OBJ_TEMP *all_temps, size_t n);
     void sortRawAddr(uintptr_t *ptr, size_t n);
     void sortRawAddr_masked(uintptr_t *ptr, size_t n);
     // void register_sigsegv(void);
