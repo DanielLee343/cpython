@@ -1657,21 +1657,21 @@ static int try_trigger_slow_scan()
         // reset_pages_hotness();
         // fast path, gc not aggresive, no need to trigger slow
         fprintf(stderr, "clearing diffs in metadata\n");
-        if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000))
-        {
-            for (unsigned int i = 0; i < old_num_op; i++)
-            {
-                for (int i = 0; i < NUM_SLOTS; i++)
-                {
-                    all_temps[i].diffs[i] = 0;
-                }
-            }
-            global_try2_sched = 0;
-            num_container_collected = 0;
-            fprintf(stderr, "early return\n");
-            return 0;
-        }
-        else
+        // if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000))
+        // {
+        //     for (unsigned int i = 0; i < old_num_op; i++)
+        //     {
+        //         for (int i = 0; i < NUM_SLOTS; i++)
+        //         {
+        //             all_temps[i].diffs[i] = 0;
+        //         }
+        //     }
+        //     global_try2_sched = 0;
+        //     num_container_collected = 0;
+        //     fprintf(stderr, "early return\n");
+        //     return 0;
+        // }
+        // else
         {
             for (unsigned int i = 0; i < old_num_op; i++)
             {
@@ -1696,13 +1696,13 @@ static int try_trigger_slow_scan()
         goto reset_and_return;
     }
 
-    if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000)) // if either newly created container_op or recently connected op is small, then just skip slow
-    {
-        fprintf(stderr, "I don't see much container op created, skip slow...\n");
-        global_try2_sched = 0;
-        num_container_collected = 0;
-        return 0;
-    }
+    // if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000)) // if either newly created container_op or recently connected op is small, then just skip slow
+    // {
+    //     fprintf(stderr, "I don't see much container op created, skip slow...\n");
+    //     global_try2_sched = 0;
+    //     num_container_collected = 0;
+    //     return 0;
+    // }
     // do cascade tracing
     kv_init(local_ptr_vec);
     double cur_cascading_time = try_cascading_old(total_num_slow);
@@ -3251,7 +3251,7 @@ int check_in_global_helper(uintptr_t op)
 
 void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
 {
-    // fprintf(stderr, "start_idx: %u, end_idx: %u\n", start_idx, end_idx);
+    fprintf(stderr, "sampling from: %u, to: %u\n", start_idx, end_idx);
     int prev_scan_idx = (scan_idx == 0) ? (NUM_SLOTS - 2) : (scan_idx - 1);
     // fprintf(stderr, "prev_scan_idx: %d, cur scan_idx: %d\n", prev_scan_idx, scan_idx);
     for (int i = start_idx; i < end_idx; i++)
@@ -3556,6 +3556,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     double elapsed;
 
     // cur_hot_in_all = (double)max_num_hot / old_num_op;
+    fprintf(stderr, "migration from %u to %u\n", start_idx, end_idx);
     fprintf(stderr, "--------start\n");
     uintptr_t *cold_arr = NULL, *hot_arr = NULL;
     double cur_migration_time = 0.0;
@@ -3737,6 +3738,7 @@ void *manual_trigger_scan(void *arg)
         fprintf(stderr, "CXL offloading is not supported!\n");
         return NULL;
     }
+    numa_set_preferred(0);
     // global_op_set = kh_init(ptrset);
     // init_global_set_helper();
     // if (trigger_bk() == 0)
@@ -3795,6 +3797,7 @@ void *manual_trigger_scan(void *arg)
             if (reset_all_temps == -1)
             {
                 usleep(2000000);
+                fprintf(stderr, "unlikely, check once\n");
                 goto rollback_slow_scan;
             }
             fast_scan_idx = 0; // start fast scan
@@ -3821,7 +3824,7 @@ void *manual_trigger_scan(void *arg)
             else if (reset_all_temps == 2)
             {
                 fprintf(stderr, "previous part need record, new part need only update prev_recnt\n");
-                record_temp(fast_scan_idx, 0, prev_num_op);
+                record_temp(fast_scan_idx, 0, partition);
                 for (int i = prev_num_op; i < old_num_op; i++)
                 {
                     if (sigsetjmp(jump_buffer, 1) == 0)
@@ -3968,6 +3971,7 @@ void *manual_trigger_scan(void *arg)
         // if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
         // {
         // double deleted_in_all = (double)not_in_global_set / old_num_op;
+        // fprintf(stderr, "not_in_global_set: %d, deleted_in_all: %.3f\n", not_in_global_set, deleted_in_all);
         // if (deleted_in_all > 0.9)
         // {
         //     fprintf(stderr, "unlikely, most op are deleted, rollback to slow\n");
@@ -3984,16 +3988,14 @@ void *manual_trigger_scan(void *arg)
         if (very_first_bk)
             very_first_bk = false;
 
-        if (fast_scan_idx == 3)
-        {
-            fprintf(stderr, "migration from 0 to %u\n", partition * 4);
-            total_migration_time += try_trigger_migration_revised(0, partition * 4);
-        }
+        // if (fast_scan_idx == 3)
+        // {
+        //     total_migration_time += try_trigger_migration_revised(0, partition * 4);
+        // }
 
         if (++fast_scan_idx >= NUM_SLOTS - 1)
         {
             fast_scan_idx = -1; // roll back to slow scan
-            fprintf(stderr, "migration from %u to %u\n", partition * 4, partition * 7);
             // force promotion
             // if (old_num_op > 1000000 && cur_hot_in_all < 0.1)
             // {
@@ -4001,7 +4003,7 @@ void *manual_trigger_scan(void *arg)
             //     forced_promo = true;
             // }
 
-            cur_mig_time = try_trigger_migration_revised(partition * 4, partition * 7);
+            cur_mig_time = try_trigger_migration_revised(0, partition * 7);
             total_migration_time += cur_mig_time;
             max_num_hot = 0;
             if (doIO_)
@@ -4053,6 +4055,7 @@ void *manual_trigger_scan(void *arg)
         else
             usleep(global_bookkeep_args->sample_dur);
     }
+    numa_set_localalloc();
     terminate_flag_refchain = 0;
     enable_bk = 0;
     fprintf(stderr, "total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_cur_cascading_time, total_migration_time);

@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <mutex>
 #include <Python.h>
+// #include <numa.h>
+// #include <numaif.h>
+// numa_set_preferred(0);
 std::mutex global_set_mutex;
 static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
