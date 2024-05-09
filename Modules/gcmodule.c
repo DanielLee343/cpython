@@ -3632,20 +3632,35 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // first do deomotion, if needed
     if (demo_size > 0)
     {
-        if (demo_size < max_size)
+        if (promo_size < 256)
         {
-            // demote_pages = (void **)numa_realloc(demote_pages, max_size * sizeof(void *), demo_size * sizeof(void *));
-            demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+            demo_size = 0; // No need to demote
+            free(demote_pages);
+            demote_pages = NULL;
         }
-        cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // demote to CXL
-        is_migration = true;
+        else
+        {
+            if (demo_size < max_size)
+            {
+                demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+                // if (new_pages == NULL) {
+                //     // Handle realloc failure; assume demote_pages is still valid if realloc fails
+                //     perror("Failed to realloc demote_pages");
+                //     free(demote_pages);
+                //     demote_pages = NULL;
+                // }
+                // demote_pages = new_pages;
+            }
+            cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
+            is_migration = true;
+        }
     }
     else
     {
         free(demote_pages);
-        // numa_free(demote_pages, max_size * sizeof(void *));
         demote_pages = NULL;
     }
+
     // resize promo size if DRAM is scarce
     int free_dram_size = check_dram_free();
     assert(free_dram_size >= 0);
