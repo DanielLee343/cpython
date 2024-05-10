@@ -3756,10 +3756,10 @@ void *manual_trigger_scan(void *arg)
     numa_set_preferred(0);
     // global_op_set = kh_init(ptrset);
     // init_global_set_helper();
-    // if (trigger_bk() == 0)
-    // {
-    //     return NULL;
-    // }
+    if (trigger_bk() == 0)
+    {
+        return NULL;
+    }
     // else if return 1: start triggering scan
 
     enable_bk = 1;
@@ -3799,10 +3799,10 @@ void *manual_trigger_scan(void *arg)
     while (!terminate_flag_refchain)
     {
     rollback_slow_scan:
-        // if (trigger_bk() == 0)
-        // {
-        //     break;
-        // }
+        if (trigger_bk() == 0)
+        {
+            break;
+        }
         zero_hot_num = 0;
         cur_fast_num_hot = 0; // reset for every fast scan
         not_in_global_set = 0;
