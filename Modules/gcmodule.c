@@ -40,7 +40,7 @@
 
 #include "myset.h"
 #include "kh_set_wrap.h"
-static double total_cur_cascading_time = 0.0;
+static double total_slow_time = 0.0;
 static int total_num_slow = 0;
 unsigned long global_try2_sched = 0;
 // int need2_check_set = 1;
@@ -54,6 +54,7 @@ kvec_t(PyObject *) local_ptr_vec;
 
 BookkeepArgs *global_bookkeep_args;
 uintptr_t glb_lowest_op = UINTPTR_MAX;
+struct timespec global_start, global_current;
 
 static clock_t last_live_trace_time;
 static clock_t last_migrate_time;
@@ -77,7 +78,8 @@ long cutoff_counter = 0;
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
 bool early_return = false;
-double cutoff_limit = 0;
+bool skip_future_slow = false;
+double cutoff_limit = 0, global_elapsed = 0;
 unsigned long cur_fast_num_hot = 0;
 static bool very_first_bk = true;
 unsigned long not_in_global_set = 0;
@@ -1682,6 +1684,13 @@ static int try_trigger_slow_scan()
             }
         }
     }
+    if (skip_future_slow)
+    {
+        global_try2_sched = 0;
+        num_container_collected = 0;
+        fprintf(stderr, "skip slow and return\n");
+        return 0;
+    }
     if (div > 1.15)
     {
         fprintf(stderr, "free and reset metadata\n");
@@ -1707,10 +1716,10 @@ static int try_trigger_slow_scan()
     kv_init(local_ptr_vec);
     double cur_cascading_time = try_cascading_old(total_num_slow);
     {
-        total_cur_cascading_time += cur_cascading_time;
+        total_slow_time += cur_cascading_time;
         total_num_slow++;
     }
-    fprintf(stderr, "total_cur_cascading_time: %.3f, total_num_slow: %d\n", total_cur_cascading_time, total_num_slow);
+    fprintf(stderr, "total_slow_time: %.3f, total_num_slow: %d\n", total_slow_time, total_num_slow);
 
     fprintf(stderr, "new_op size: %d\n", kv_size(local_ptr_vec));
 
@@ -3748,6 +3757,7 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
+
     if (numa_available() == -1 || numa_num_configured_nodes() < 2)
     {
         fprintf(stderr, "CXL offloading is not supported!\n");
@@ -3790,7 +3800,7 @@ void *manual_trigger_scan(void *arg)
     int reset_all_temps = 1;
     last_demote_pages = kh_init(ptrset_dup);
     struct timespec start_fast, end_fast;
-
+    clock_gettime(CLOCK_MONOTONIC, &global_start);
     // int scan_stat = 0;
     // while (!terminate_flag_refchain)
     // {
@@ -4017,6 +4027,15 @@ void *manual_trigger_scan(void *arg)
             //     fprintf(stderr, "Attention! Enable forced promotion...\n");
             //     forced_promo = true;
             // }
+            // determine if we want to skip future slow trace
+            clock_gettime(CLOCK_MONOTONIC, &global_current);
+            global_elapsed = global_current.tv_sec - global_start.tv_sec;
+            global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
+            if (total_num_slow > 2 && total_slow_time > global_elapsed / 10)
+            {
+                fprintf(stderr, "skipping future slow\n");
+                skip_future_slow = true;
+            }
 
             cur_mig_time = try_trigger_migration_revised(0, partition * 7);
             total_migration_time += cur_mig_time;
@@ -4073,7 +4092,7 @@ void *manual_trigger_scan(void *arg)
     numa_set_localalloc();
     terminate_flag_refchain = 0;
     enable_bk = 0;
-    fprintf(stderr, "total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_cur_cascading_time, total_migration_time);
+    fprintf(stderr, "Summary: total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_slow_time, total_migration_time);
     free(all_temps);
     // numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
     kh_destroy(ptrset_dup, last_demote_pages);
