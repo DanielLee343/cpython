@@ -3221,7 +3221,7 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
         double elapsed_ = (cutoff_current.tv_sec - cutoff_start.tv_sec) + (cutoff_current.tv_nsec - cutoff_start.tv_nsec) / 1.0e9;
         if (elapsed_ > cutoff_limit)
         {
-            cutoff_limit *= 2;
+            // cutoff_limit *= 2;
             fprintf(stderr, "Early stop, elapsed_: %.3f, counter: %d, cutoff_limit update: %.3f\n", elapsed_, cutoff_counter, cutoff_limit);
             early_return = true;
         }
