@@ -77,6 +77,7 @@ long cutoff_counter = 0;
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
+#define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
 double cutoff_limit = 0, global_elapsed = 0;
@@ -3744,7 +3745,7 @@ int trigger_bk()
         double free_dram_size_mb = free_dram_size / 1048576.0;
 
         // if (freePercentage < TRIGGER_SCAN_WM) // 35%
-        if (free_dram_size_mb < 200) // < remain hard 200mb in DRAM
+        if (free_dram_size_mb < METADATA_SIZE + 200) // by doing this, we make sure we have enough place for metadata on local DRAM
         {
             fprintf(stderr, "Start triggering scan\n");
             return 1;
@@ -4081,7 +4082,7 @@ void *manual_trigger_scan(void *arg)
             }
         }
     skip_fast_scans:
-        if (cur_fast_time > 2.5 && cur_hot_in_all < 0.05 || (fast_scan_idx == -1 && cur_mig_time < 0.001))
+        if ((cur_fast_time > 2.5 && cur_hot_in_all < 0.05) || (fast_scan_idx == -1 && cur_mig_time < 0.001))
         {
             fprintf(stderr, "relaxed fast/slow, sleep longer\n");
             // usleep(global_bookkeep_args->sample_dur * 2);
