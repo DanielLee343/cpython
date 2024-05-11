@@ -452,7 +452,7 @@ check by comparing the reference count field to the immortality reference count.
         unsigned int sample_dur;
         FILE *fd;
         unsigned int doIO;
-        int rescan_thresh;
+        int metadata_resv;
         PyThreadState *mainThreadState;
         unsigned int cutoff_limit;
     } BookkeepArgs;

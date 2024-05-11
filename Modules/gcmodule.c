@@ -60,7 +60,6 @@ static clock_t last_live_trace_time;
 static clock_t last_migrate_time;
 extern int enable_bk;
 // unsigned long get_live_time_thresh;
-unsigned long migration_time_thresh;
 unsigned long num_gc_cycles = 0;
 struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
@@ -77,7 +76,7 @@ long cutoff_counter = 0;
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
-#define METADATA_SIZE 1024 // reserved metadata size in MB
+// #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
 double cutoff_limit = 0, global_elapsed = 0;
@@ -265,7 +264,6 @@ _PyGC_Init(PyInterpreterState *interp)
     last_live_trace_time = clock();
     enable_bk = 0;
     // get_live_time_thresh = INT_MAX;  // don't trigger slow scan by default
-    migration_time_thresh = INT_MAX; // don't trigger migration by default
     py_main_tstate = _PyThreadState_GET();
     for (int i = 0; i < NUM_GENERATIONS; i++)
     {
@@ -3745,7 +3743,8 @@ int trigger_bk()
         double free_dram_size_mb = free_dram_size / 1048576.0;
 
         // if (freePercentage < TRIGGER_SCAN_WM) // 35%
-        if (free_dram_size_mb < METADATA_SIZE + 200) // by doing this, we make sure we have enough place for metadata on local DRAM
+        fprintf(stderr, "set metadata_resv: %d\n", global_bookkeep_args->metadata_resv);
+        if (free_dram_size_mb < global_bookkeep_args->metadata_resv) // by doing this, we make sure we have enough place for metadata on local DRAM
         {
             fprintf(stderr, "Start triggering scan\n");
             return 1;
@@ -3759,7 +3758,7 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
-
+    global_bookkeep_args = (BookkeepArgs *)arg;
     if (numa_available() == -1 || numa_num_configured_nodes() < 2)
     {
         fprintf(stderr, "CXL offloading is not supported!\n");
@@ -3768,14 +3767,13 @@ void *manual_trigger_scan(void *arg)
     numa_set_preferred(0);
     // global_op_set = kh_init(ptrset);
     // init_global_set_helper();
+    // else if return 1: start triggering scan
+
+    enable_bk = 1;
     if (trigger_bk() == 0)
     {
         return NULL;
     }
-    // else if return 1: start triggering scan
-
-    enable_bk = 1;
-    global_bookkeep_args = (BookkeepArgs *)arg;
     if (!global_bookkeep_args->cutoff_limit)
     {
         cutoff_limit = 2;
@@ -3784,9 +3782,7 @@ void *manual_trigger_scan(void *arg)
     {
         cutoff_limit = (double)global_bookkeep_args->cutoff_limit / 1000000.0;
     }
-    migration_time_thresh = 2000000; // 2s, thus, trigger migration by default
     fprintf(stderr, "trigger from manual\n");
-    int rescan_thresh = global_bookkeep_args->rescan_thresh;
     unsigned int doIO_ = global_bookkeep_args->doIO;
     int fast_scan_idx = -1;
     double cur_mig_time = 0;
