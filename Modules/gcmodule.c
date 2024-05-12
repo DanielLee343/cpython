@@ -4073,7 +4073,8 @@ void *manual_trigger_scan(void *arg)
             clock_gettime(CLOCK_MONOTONIC, &global_current);
             global_elapsed = global_current.tv_sec - global_start.tv_sec;
             global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
-            if (total_num_slow % 3 == 0 && total_slow_time > global_elapsed / 10)
+            // total_num_slow % 3 == 0
+            if (total_slow_time > (double)global_elapsed / 20)
             {
                 fprintf(stderr, "skipping future slow\n");
                 skip_future_slow = true;
