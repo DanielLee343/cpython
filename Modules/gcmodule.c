@@ -3556,11 +3556,9 @@ int count_duplicates(void **arr1, int size1, void **arr2, int size2)
 bool very_first_demote = true;
 bool very_first_mig = true;
 khash_t(ptrset_dup) * last_demote_pages; // for lazy demotion
-khash_t(ptrset_dup) * dupped_pages;      // for testing dupped migration
 double prev_c_w_percent = 0.0;
 double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_idx)
 {
-    // dupped_pages = kh_init(ptrset_dup);
     struct timespec start, end;
     double elapsed;
 
@@ -3649,19 +3647,64 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         }
         else
         {
-            if (demo_size < max_size)
+            if (very_first_demote)
             {
-                demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
-                // if (new_pages == NULL) {
-                //     // Handle realloc failure; assume demote_pages is still valid if realloc fails
-                //     perror("Failed to realloc demote_pages");
-                //     free(demote_pages);
-                //     demote_pages = NULL;
-                // }
-                // demote_pages = new_pages;
+                last_demote_pages = kh_init(ptrset_dup);
+                for (int i = 0; i < demo_size; i++)
+                {
+                    kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+                }
+                if (demo_size < max_size)
+                {
+                    demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+                }
+                cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
+                is_migration = true;
+                very_first_demote = false;
             }
-            cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
-            is_migration = true;
+            else
+            {
+                size_t prev_demo_size = kh_size(last_demote_pages);
+                size_t dupCount = 0;
+                for (int i = 0; i < demo_size; i++)
+                {
+                    khint_t k = kh_get(ptrset_dup, last_demote_pages, demote_pages[i]);
+                    if (k != kh_end(last_demote_pages))
+                    {
+                        dupCount++;
+                    }
+                }
+                double intersection_ratio = (double)dupCount / prev_demo_size;
+                fprintf(stderr, "intersection_ratio: %.3f\n", intersection_ratio);
+                if (intersection_ratio > 0.6)
+                {
+                    // demote current demote_pages
+                    if (demo_size < max_size)
+                    {
+                        demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+                    }
+                    cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
+                    is_migration = true;
+                    kh_destroy(ptrset_dup, last_demote_pages);
+                    last_demote_pages = kh_init(ptrset_dup);
+                    for (int i = 0; i < demo_size; i++)
+                    {
+                        kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+                    }
+                }
+                else
+                {
+                    kh_destroy(ptrset_dup, last_demote_pages);
+                    last_demote_pages = kh_init(ptrset_dup);
+                    for (int i = 0; i < demo_size; i++)
+                    {
+                        kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+                    }
+                    demo_size = 0;
+                    free(demote_pages);
+                    demote_pages = NULL;
+                }
+            }
         }
     }
     else
@@ -3796,7 +3839,6 @@ void *manual_trigger_scan(void *arg)
     double total_fast_time = 0.0;
     int total_fast_num = 0;
     int reset_all_temps = 1;
-    last_demote_pages = kh_init(ptrset_dup);
     struct timespec start_fast, end_fast;
     clock_gettime(CLOCK_MONOTONIC, &global_start);
     // int scan_stat = 0;
