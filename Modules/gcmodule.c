@@ -3642,6 +3642,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     {
         if (promo_size < 256)
         {
+            fprintf(stderr, "Ok, no need to demote\n");
             demo_size = 0; // No need to demote
             free(demote_pages);
             demote_pages = NULL;
