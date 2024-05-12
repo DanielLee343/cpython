@@ -4037,6 +4037,7 @@ void *manual_trigger_scan(void *arg)
 
             cur_mig_time = try_trigger_migration_revised(0, partition * 7);
             total_migration_time += cur_mig_time;
+            fprintf(stderr, "total_migration_time: %.3f\n", total_migration_time);
             max_num_hot = 0;
             if (doIO_)
             {
