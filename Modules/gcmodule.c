@@ -3637,6 +3637,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
     // first do deomotion, if needed
+    fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
     if (demo_size > 0)
     {
         if (promo_size < 256)
