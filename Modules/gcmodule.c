@@ -3828,6 +3828,7 @@ void *manual_trigger_scan(void *arg)
         cutoff_limit = (double)global_bookkeep_args->cutoff_limit / 1000000.0;
     }
     fprintf(stderr, "trigger from manual\n");
+    fprintf(stderr, "skip future slow thresh: %d\n", global_bookkeep_args->skip_future_slow_thresh);
     unsigned int doIO_ = global_bookkeep_args->doIO;
     int fast_scan_idx = -1;
     double cur_mig_time = 0;
@@ -4074,7 +4075,7 @@ void *manual_trigger_scan(void *arg)
             global_elapsed = global_current.tv_sec - global_start.tv_sec;
             global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
             // total_num_slow % 3 == 0
-            if (total_slow_time > (double)global_elapsed / 20)
+            if (total_slow_time > (double)global_elapsed / (100 / global_bookkeep_args->skip_future_slow_thresh))
             {
                 fprintf(stderr, "skipping future slow\n");
                 skip_future_slow = true;

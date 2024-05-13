@@ -449,12 +449,13 @@ check by comparing the reference count field to the immortality reference count.
 
     typedef struct
     {
-        unsigned int sample_dur;
-        FILE *fd;
-        unsigned int doIO;
-        int metadata_resv;
-        PyThreadState *mainThreadState;
-        unsigned int cutoff_limit;
+        unsigned int sample_dur;        // in microseconds scale, the sampling duration between each active trace
+        FILE *fd;                       // for debugging
+        unsigned int doIO;              // for debugging
+        int metadata_resv;              // MB scale, denotes under how much memory pressure shall be trigger pypper
+        PyThreadState *mainThreadState; // not used
+        unsigned int cutoff_limit;      // microseconds scale, denotes a hard timeout boundary for each live trace
+        int skip_future_slow_thresh;    // percent scale, denotes when the accumulated live trace (blocking) time exceeds x% of the time from the start of pypper is triggered, the next live trace is skipped
     } BookkeepArgs;
     extern BookkeepArgs bookkeepArgs;
 
