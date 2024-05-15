@@ -129,7 +129,7 @@ extern "C" void reset_all_temps_map()
 }
 // pages_loc_hotness
 // map_pair
-extern "C" void insert_into_pages(uintptr_t page_addr, short hotness)
+extern "C" void insert_into_pages(uintptr_t page_addr, short hotness, bool location)
 {
     auto it = map_pair.find(page_addr);
     if (it != map_pair.end())
@@ -141,7 +141,7 @@ extern "C" void insert_into_pages(uintptr_t page_addr, short hotness)
     {
         // map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
         // map_pair[page_addr] = std::make_pair(is_hot ? hotness : 0, false);
-        map_pair[page_addr] = std::make_pair(hotness, false);
+        map_pair[page_addr] = std::make_pair(hotness, location); // false (0): DRAM, true (1): CXL
     }
 }
 

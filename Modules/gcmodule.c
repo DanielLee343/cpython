@@ -3463,48 +3463,52 @@ int comparePageCount(const void *a, const void *b)
     return ((PageCount *)b)->count - ((PageCount *)a)->count;
 }
 
-void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end_idx, bool is_hot)
-{
-    if (end_idx == 0)
-    {
-        fprintf(stderr, "unlikely, error\n");
-        return;
-    }
-    if (forced_promo)
-    {
-        assert(start_idx == 0);
-        assert(end_idx == old_num_op);
-        assert(is_hot == 1);
-        for (unsigned int i = start_idx; i < end_idx; i++)
-        {
-            short cur_op_hotness = 2;
-            uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-            insert_into_pages(masked_addr, cur_op_hotness);
-        }
-    }
-    else
-    {
-        for (unsigned int i = start_idx; i < end_idx; i++)
-        {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-            insert_into_pages(masked_addr, cur_op_hotness);
-        }
-    }
-}
+// void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end_idx, bool is_hot)
+// {
+//     if (end_idx == 0)
+//     {
+//         fprintf(stderr, "unlikely, error\n");
+//         return;
+//     }
+//     if (forced_promo)
+//     {
+//         assert(start_idx == 0);
+//         assert(end_idx == old_num_op);
+//         assert(is_hot == 1);
+//         for (unsigned int i = start_idx; i < end_idx; i++)
+//         {
+//             short cur_op_hotness = 2;
+//             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
+//             insert_into_pages(masked_addr, cur_op_hotness);
+//         }
+//     }
+//     else
+//     {
+//         for (unsigned int i = start_idx; i < end_idx; i++)
+//         {
+//             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+//             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
+//             insert_into_pages(masked_addr, cur_op_hotness);
+//         }
+//     }
+// }
 
-void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
+void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, bool is_CXL)
 {
     if (end_idx == 0)
     {
         fprintf(stderr, "unlikely, error\n");
         return;
     }
+    // int count_non_zero = 0;
     for (unsigned int i = start_idx; i < end_idx; i++)
     {
         short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-        insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+        // if (cur_op_hotness)
+        //     count_non_zero++;
+        insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
     }
+    // fprintf(stderr, "count_non_zero: %d\n", count_non_zero);
 }
 
 bool is_old_num_remain_still()
@@ -3613,7 +3617,17 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // {
     //     align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
     // }
-    align_obj_2_page_bd_revised(start_idx, end_idx);
+
+    //determine where the new op's are
+    bool is_CXL = false;
+    if (check_dram_free() < 60)
+    {
+        fprintf(stderr, "likely to be in CXL\n");
+        is_CXL = true; // mark in CXL
+    } else {
+        fprintf(stderr, "likely to be in DRAM\n");
+    }
+    align_obj_2_page_bd_revised(start_idx, end_idx, is_CXL);
 
     // short min_hotness, max_hotness;
     // get_page_hotness_bound(&min_hotness, &max_hotness);
@@ -3625,6 +3639,8 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     void **promote_pages = calloc(max_size, sizeof(void *));
     // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
     // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
+
+    
 
     if (very_first_mig)
     {
