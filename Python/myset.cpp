@@ -68,7 +68,7 @@ extern "C" int valid_global_set()
     return (&global_unordered_set != nullptr);
 }
 
-extern "C" void reset_all_temps()
+extern "C" void reset_all_temps_func()
 {
     free(all_temps);
     unsigned int new_num_op = global_unordered_set.size();
@@ -142,6 +142,14 @@ extern "C" void insert_into_pages(uintptr_t page_addr, short hotness, bool locat
         // map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
         // map_pair[page_addr] = std::make_pair(is_hot ? hotness : 0, false);
         map_pair[page_addr] = std::make_pair(hotness, location); // false (0): DRAM, true (1): CXL
+    }
+}
+extern "C" void insert_into_pages_only_exists(uintptr_t page_addr, short hotness)
+{
+    auto it = map_pair.find(page_addr);
+    if (it != map_pair.end())
+    {
+        it->second.first += hotness;
     }
 }
 

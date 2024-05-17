@@ -19,7 +19,7 @@ extern "C"
     void erase_from_global_safe(uintptr_t value);
     void print_global_addr(FILE *fd, int round);
 
-    void reset_all_temps();
+    void reset_all_temps_func();
 
     // global_unordered_map
     void insert_into_map(uintptr_t key, bool val);
@@ -32,6 +32,7 @@ extern "C"
     // pages_loc_hotness
     // void insert_into_pages(uintptr_t page_addr, short hotness);
     void insert_into_pages(uintptr_t page_addr, short hotness, bool location);
+    void insert_into_pages_only_exists(uintptr_t page_addr, short hotness);
     int check_in_pages(uintptr_t page);
     void erase_from_pages(uintptr_t page);
     void free_pages();

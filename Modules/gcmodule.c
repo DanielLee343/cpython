@@ -63,6 +63,7 @@ extern int enable_bk;
 unsigned long num_gc_cycles = 0;
 struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
+int reset_all_temps = 1;
 #define PAGE_SIZE 4096
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define LEN_THRESHOLD 2
@@ -1695,7 +1696,7 @@ static int try_trigger_slow_scan()
     {
         fprintf(stderr, "free and reset metadata\n");
         clock_gettime(CLOCK_MONOTONIC, &start);
-        reset_all_temps();
+        reset_all_temps_func();
         // PyGILState_Release(reset_gil);
         clock_gettime(CLOCK_MONOTONIC, &end);
         elapsed = end.tv_sec - start.tv_sec;
@@ -2351,59 +2352,6 @@ referentsvisit(PyObject *obj, PyObject *list)
     // PyObject_Print(obj, stderr, 1);
     // fprintf(stderr, "\t from inner\n");
     return PyList_Append(list, obj) < 0;
-}
-
-static int cascadingvisitor(PyObject *inner_op, unsigned long *combined)
-{
-    // if (check_in_set((uintptr_t)inner_op))
-    // if (found_in_local_kset(inner_op))
-    if (check_in_global((uintptr_t)inner_op))
-    // if (check_in_map((uintptr_t)inner_op))
-    // if (found_in_kset_helper(inner_op))
-    {
-        return 0;
-    }
-
-    // *combined += 1; // increase length, stop while traversing
-    // unsigned int extracted_len = *combined & 0xFFFFFFFF;
-    // if (extracted_len > LEN_THRESHOLD) //
-    // {
-    //     // max_length = extracted_len;
-    //     return;
-    // }
-
-    insert_into_global((uintptr_t)inner_op);
-    // insert_into_map((uintptr_t)inner_op, 0);
-    // insert_global_set_helper(inner_op);
-    kv_push(PyObject *, local_ptr_vec, inner_op); // vector, dynamic resizing
-    // inner_traversing(inner_op, combined); // for testing gc.get_referents()
-    update_recursive_visitor(inner_op, combined); // for real
-    return 0;
-}
-void inner_traversing(PyObject *each_op, unsigned int *combined)
-{
-    if (!each_op || !_PyObject_IS_GC(each_op))
-    {
-        return;
-    }
-    traverseproc traverse = Py_TYPE(each_op)->tp_traverse;
-    if (!traverse)
-        return;
-
-    // unsigned int new_len = 0;
-    // new_len |= (*combined << 16);
-
-    unsigned int last_length = *combined & 0xFFFF;
-    *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
-    // fprintf(stderr, "last length preserved: %u\n", last_length);
-
-    *combined += (1 << 16); // increase depths
-    unsigned int extractedDepth = (*combined >> 16);
-    fprintf(stderr, "depth: %u\n", extractedDepth);
-
-    traverse(each_op, (visitproc)cascadingvisitor, combined);
-    *combined = (*combined & 0xFFFF0000) | last_length;
-    // set length to last_length
 }
 
 PyDoc_STRVAR(gc_get_referents__doc__,
@@ -3170,25 +3118,58 @@ void PyUnstable_GC_VisitObjects(gcvisitobjects_t callback, void *arg)
 done:
     gcstate->enabled = origenstate;
 }
-static bool ismapped(const void *ptr, int bytes)
+
+static int cascadingvisitor(PyObject *inner_op, unsigned long *combined)
 {
-    if (ptr == NULL)
+    // if (check_in_set((uintptr_t)inner_op))
+    // if (found_in_local_kset(inner_op))
+    if (check_in_global((uintptr_t)inner_op))
+    // if (check_in_map((uintptr_t)inner_op))
+    // if (found_in_kset_helper(inner_op))
     {
         return 0;
     }
-    int fd[2];
-    int valid = 1;
-    pipe(fd);
-    if (write(fd[1], ptr, bytes) < 0)
-    { // try to write it, if getting outside, SEGFAULT
-        if (errno == EFAULT)
-        {
-            valid = 0;
-        }
+
+    // *combined += 1; // increase length, stop while traversing
+    // unsigned int extracted_len = *combined & 0xFFFFFFFF;
+    // if (extracted_len > LEN_THRESHOLD) //
+    // {
+    //     // max_length = extracted_len;
+    //     return;
+    // }
+
+    insert_into_global((uintptr_t)inner_op);
+    // insert_into_map((uintptr_t)inner_op, 0);
+    // insert_global_set_helper(inner_op);
+    kv_push(PyObject *, local_ptr_vec, inner_op); // vector, dynamic resizing
+    // inner_traversing(inner_op, combined); // for testing gc.get_referents()
+    update_recursive_visitor(inner_op, combined); // for real
+    return 0;
+}
+void inner_traversing(PyObject *each_op, unsigned int *combined)
+{
+    if (!each_op || !_PyObject_IS_GC(each_op))
+    {
+        return;
     }
-    close(fd[0]);
-    close(fd[1]);
-    return valid;
+    traverseproc traverse = Py_TYPE(each_op)->tp_traverse;
+    if (!traverse)
+        return;
+
+    // unsigned int new_len = 0;
+    // new_len |= (*combined << 16);
+
+    unsigned int last_length = *combined & 0xFFFF;
+    *combined &= 0xFFFF0000; // reset the lower 2 bytes (lengths), this is needed
+    // fprintf(stderr, "last length preserved: %u\n", last_length);
+
+    *combined += (1 << 16); // increase depths
+    unsigned int extractedDepth = (*combined >> 16);
+    fprintf(stderr, "depth: %u\n", extractedDepth);
+
+    traverse(each_op, (visitproc)cascadingvisitor, combined);
+    *combined = (*combined & 0xFFFF0000) | last_length;
+    // set length to last_length
 }
 
 void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
@@ -3332,42 +3313,6 @@ void sort_dnf(int *low, int *mid, int *high)
     fprintf(stderr, "after low: %d, mid: %d, high: %d, all: %d\n", *low, *mid, *high, old_num_op);
 }
 
-// void **getPageBoundaries(PyObj_range *intervals, int intervalSize, int *boundarySize)
-// {
-//     *boundarySize = 0;
-
-//     // First pass: calculate the total number of page boundaries
-//     for (int i = 0; i < intervalSize; i++)
-//     {
-//         uintptr_t start_page = intervals[i].start / PAGE_SIZE;
-//         // uintptr_t end_page = (intervals[i].end + PAGE_SIZE - 1) / PAGE_SIZE; // Round up to include the last page
-//         uintptr_t end_page = intervals[i].end / PAGE_SIZE;
-//         *boundarySize += (end_page - start_page);
-//     }
-
-//     // Allocate memory for the total number of page boundaries
-//     void **boundaries = malloc(*boundarySize * sizeof(void *));
-//     if (!boundaries)
-//     {
-//         // Handle malloc failure
-//         *boundarySize = 0;
-//         return NULL;
-//     }
-
-//     // Second pass: populate the boundaries array
-//     int index = 0;
-//     for (int i = 0; i < intervalSize; i++)
-//     {
-//         for (uintptr_t j = intervals[i].start; j < intervals[i].end; j += PAGE_SIZE)
-//         {
-//             boundaries[index++] = (void *)(j - j % PAGE_SIZE);
-//         }
-//     }
-
-//     // No need to realloc, as we've allocated the exact amount of memory needed
-//     return boundaries;
-// }
-
 double do_migration(void **pages, int num_pages, int dest_node)
 {
     int *nodes = calloc(num_pages, sizeof(int));
@@ -3424,35 +3369,6 @@ double do_migration(void **pages, int num_pages, int dest_node)
     return elapsed;
 }
 
-void **align_obj_2_page_bd(unsigned int num_op, uintptr_t *op_hotness_arr, int *num_pages)
-{
-    if (!op_hotness_arr)
-        return NULL;
-
-    for (unsigned int i = 0; i < num_op; i++)
-    {
-        (op_hotness_arr)[i] &= PAGE_MASK;
-    }
-    sortRawAddr(op_hotness_arr, num_op);
-    size_t j = 0;
-    for (size_t i = 1; i < num_op; ++i)
-    {
-        if ((op_hotness_arr)[j] != (op_hotness_arr)[i])
-        {
-            (op_hotness_arr)[++j] = (op_hotness_arr)[i];
-        }
-    }
-    void **pages = calloc(j + 1, sizeof(void *));
-    for (size_t i = 0; i < j + 1; ++i)
-    {
-        pages[i] = (void *)(op_hotness_arr)[i];
-    }
-    free(op_hotness_arr);
-
-    *num_pages = j + 1;
-    fprintf(stderr, "after aligning: %zu pages\n", j + 1);
-    return pages;
-}
 typedef struct
 {
     void *pageAddress;
@@ -3463,36 +3379,6 @@ int comparePageCount(const void *a, const void *b)
     return ((PageCount *)b)->count - ((PageCount *)a)->count;
 }
 
-// void align_obj_2_page_bd_from_all_temps(unsigned int start_idx, unsigned int end_idx, bool is_hot)
-// {
-//     if (end_idx == 0)
-//     {
-//         fprintf(stderr, "unlikely, error\n");
-//         return;
-//     }
-//     if (forced_promo)
-//     {
-//         assert(start_idx == 0);
-//         assert(end_idx == old_num_op);
-//         assert(is_hot == 1);
-//         for (unsigned int i = start_idx; i < end_idx; i++)
-//         {
-//             short cur_op_hotness = 2;
-//             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-//             insert_into_pages(masked_addr, cur_op_hotness);
-//         }
-//     }
-//     else
-//     {
-//         for (unsigned int i = start_idx; i < end_idx; i++)
-//         {
-//             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-//             uintptr_t masked_addr = (uintptr_t)all_temps[i].op & PAGE_MASK;
-//             insert_into_pages(masked_addr, cur_op_hotness);
-//         }
-//     }
-// }
-
 void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, bool is_CXL)
 {
     if (end_idx == 0)
@@ -3500,15 +3386,35 @@ void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, b
         fprintf(stderr, "unlikely, error\n");
         return;
     }
-    // int count_non_zero = 0;
-    for (unsigned int i = start_idx; i < end_idx; i++)
+    // for (unsigned int i = start_idx; i < end_idx; i++)
+    // {
+    //     short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+    //     insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
+    // }
+    // if (reset_all_temps == 1) // reset and new
+    // {   
+    //     fprintf(stderr, "reset / first\n");
+    //     for (unsigned int i = start_idx; i < end_idx; i++)
+    //     {
+    //         short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+    //         insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, 0);
+    //     }
+    // } 
+    // else if (reset_all_temps == 2)
     {
-        short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-        // if (cur_op_hotness)
-        //     count_non_zero++;
-        insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
+        // fprintf(stderr, "realloc-ed\n");
+        fprintf(stderr, "%d - %d - %d\n", start_idx, prev_num_op, old_num_op);
+        for (unsigned int i = start_idx; i < prev_num_op; i++)
+        {
+            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness); 
+        }
+        for (unsigned int i = prev_num_op; i < old_num_op; i++)
+        {
+            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
+        }
     }
-    // fprintf(stderr, "count_non_zero: %d\n", count_non_zero);
 }
 
 bool is_old_num_remain_still()
@@ -3572,6 +3478,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     uintptr_t *cold_arr = NULL, *hot_arr = NULL;
     double cur_migration_time = 0.0;
     int cold_warm_idx = 0, warm_hot_idx = 0, high = old_num_op - 1;
+    bool is_dram_pressure = false;
     int ret;
     if (forced_promo)
     {
@@ -3617,17 +3524,15 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // {
     //     align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
     // }
-
-    //determine where the new op's are
-    bool is_CXL = false;
-    if (check_dram_free() < 60)
+    int cur_dram_free = check_dram_free();
+    if (cur_dram_free < 100)
     {
         fprintf(stderr, "likely to be in CXL\n");
-        is_CXL = true; // mark in CXL
+        is_dram_pressure = true; // mark in CXL
     } else {
         fprintf(stderr, "likely to be in DRAM\n");
     }
-    align_obj_2_page_bd_revised(start_idx, end_idx, is_CXL);
+    align_obj_2_page_bd_revised(start_idx, end_idx, is_dram_pressure);
 
     // short min_hotness, max_hotness;
     // get_page_hotness_bound(&min_hotness, &max_hotness);
@@ -3654,17 +3559,12 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
     // first do deomotion, if needed
     fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
-    if (demo_size > 0)
+    if (is_dram_pressure && promo_size > cur_dram_free && demo_size > 0)
     {
-        if (promo_size < 256)
-        {
-            fprintf(stderr, "Ok, no need to demote\n");
-            demo_size = 0; // No need to demote
-            free(demote_pages);
-            demote_pages = NULL;
-        }
-        else
-        {
+        if (promo_size < demo_size)
+            demo_size = promo_size;
+        // if () // not enough room for promotion && demo are
+        // {
             if (very_first_demote)
             {
                 last_demote_pages = kh_init(ptrset_dup);
@@ -3723,13 +3623,29 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
                     demote_pages = NULL;
                 }
             }
-        }
+        // }
     }
     else
     {
+        demo_size = 0;
         free(demote_pages);
         demote_pages = NULL;
     }
+    // if (demo_size > 0)
+    // {
+    //     if (promo_size < 256 || very_first_mig)
+    //     {
+    //         fprintf(stderr, "Ok, no need to demote\n");
+    //         demo_size = 0; // No need to demote
+    //         free(demote_pages);
+    //         demote_pages = NULL;
+    //     }
+    //     else
+    //     {
+            
+    //     }
+    // }
+    
 
     // resize promo size if DRAM is scarce
     int free_dram_size = check_dram_free();
@@ -3857,7 +3773,7 @@ void *manual_trigger_scan(void *arg)
     double total_migration_time = 0;
     double total_fast_time = 0.0;
     int total_fast_num = 0;
-    int reset_all_temps = 1;
+    
     struct timespec start_fast, end_fast;
     clock_gettime(CLOCK_MONOTONIC, &global_start);
     // int scan_stat = 0;
@@ -3875,6 +3791,7 @@ void *manual_trigger_scan(void *arg)
         zero_hot_num = 0;
         cur_fast_num_hot = 0; // reset for every fast scan
         not_in_global_set = 0;
+        reset_all_temps = 1;
         if (fast_scan_idx == -1)
         {
             reset_all_temps = try_trigger_slow_scan();
@@ -4090,8 +4007,8 @@ void *manual_trigger_scan(void *arg)
             clock_gettime(CLOCK_MONOTONIC, &global_current);
             global_elapsed = global_current.tv_sec - global_start.tv_sec;
             global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
-            // total_num_slow % 3 == 0
-            if (total_slow_time > (double)global_elapsed / (100 / global_bookkeep_args->skip_future_slow_thresh))
+            //
+            if ( total_num_slow % 3 == 0 && total_slow_time > (double)global_elapsed / (100 / global_bookkeep_args->skip_future_slow_thresh))
             {
                 fprintf(stderr, "skipping future slow\n");
                 skip_future_slow = true;
