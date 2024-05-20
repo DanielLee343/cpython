@@ -3325,7 +3325,7 @@ double do_migration(void **pages, int num_pages, int dest_node)
         // promotion, to DRAM
         for (int i = 0; i < num_pages; i++)
         {
-            nodes[i] = 0; // DRAM
+            nodes[i] = DRAM_MASK; // DRAM
         }
     }
     else
@@ -3333,7 +3333,7 @@ double do_migration(void **pages, int num_pages, int dest_node)
         // demotion, to CXL
         for (int i = 0; i < num_pages; i++)
         {
-            nodes[i] = 1; // CXL
+            nodes[i] = CXL_MASK; // CXL
         }
     }
     struct timespec start, end;
