@@ -64,6 +64,7 @@ unsigned long num_gc_cycles = 0;
 struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
 int reset_all_temps = 1;
+long total_new_op_num = 0;
 #define PAGE_SIZE 4096
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define LEN_THRESHOLD 2
@@ -1505,6 +1506,13 @@ double try_cascading_old(int slow_idx)
     PyGC_Head *tracing_head = (oldest_gen_head == NULL) ? global_old : oldest_gen_head; // by default, last gen, otherwise (empty), use recently GC-ed gen
     PyThreadState *tstate = _PyThreadState_GET();
     GCState *gcstate = &tstate->interp->gc;
+    // examine how many objects traced by cyclic
+    // for (int i = 0; i < 3; i++)
+    // {
+    //     PyGC_Head *cur_head = GEN_HEAD(gcstate, i);
+    //     Py_ssize_t num_ctn_obj = gc_list_size(cur_head);
+    //     fprintf(stderr, "GEN %d: %d\n", i, num_ctn_obj);
+    // }
     for (int i = 0; i < NUM_GENERATIONS; i++)
     {
         // uintptr_t local_lowest_op = UINTPTR_MAX;
@@ -1722,8 +1730,18 @@ static int try_trigger_slow_scan()
     }
     fprintf(stderr, "total_slow_time: %.3f, total_num_slow: %d\n", total_slow_time, total_num_slow);
 
-    fprintf(stderr, "new_op size: %d\n", kv_size(local_ptr_vec));
+    if (!very_first_bk)
+    {
+        total_new_op_num += kv_size(local_ptr_vec);
+    }
+    fprintf(stderr, "new_op size: %d, accumulated new_op: %ld\n", kv_size(local_ptr_vec), total_new_op_num);
 
+#ifdef FORCE_REFORM_ALL_TEMPS
+    fprintf(stderr, "force reform all_temps!\n");
+    reset_all_temps_func();
+    ret = 1;
+    goto reset_and_return;
+#endif
     // if (kv_size(local_ptr_vec) > 1000)
     if (kv_size(local_ptr_vec) < 1000)
     {
@@ -1750,7 +1768,7 @@ static int try_trigger_slow_scan()
 reset_and_return:
     num_container_collected = 0;
     global_try2_sched = 0;
-    num_gc_cycles = 0;
+    // num_gc_cycles = 0;
     return ret;
 }
 
@@ -2023,7 +2041,7 @@ invoke_gc_callback(PyThreadState *tstate, const char *phase,
     Py_DECREF(phase_obj);
     Py_XDECREF(info);
     assert(!_PyErr_Occurred(tstate));
-    if (!strcmp(phase, "stop"))
+    if (!strcmp(phase, "stop") && enable_bk)
     {
         num_gc_cycles++;
     }
@@ -3194,17 +3212,18 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
     traverse = Py_TYPE(each_op)->tp_traverse;
     if (!traverse)
         return;
-    // {
-    // unsigned int last_length = *combined & 0xFFFFFFFF;
-    // *combined &= 0xFFFFFFFF00000000; // reset the lower 2 bytes (lengths), this is needed
-    // *combined += ((uint64_t)1 << 32);
-    //     unsigned int extractedDepth = (*combined >> 32);
-    //     if (extractedDepth > DEPTH_THRESHOLD) //
-    //     {
-    //         // max_depth = extractedDepth;
-    //         return;
-    //     }
-    // }
+        // {
+        // unsigned int last_length = *combined & 0xFFFFFFFF;
+        // *combined &= 0xFFFFFFFF00000000; // reset the lower 2 bytes (lengths), this is needed
+        // *combined += ((uint64_t)1 << 32);
+        //     unsigned int extractedDepth = (*combined >> 32);
+        //     if (extractedDepth > DEPTH_THRESHOLD) //
+        //     {
+        //         // max_depth = extractedDepth;
+        //         return;
+        //     }
+        // }
+#ifdef EARLY_CUTOFF
     if (++cutoff_counter % 20 == 0)
     {
         clock_gettime(CLOCK_MONOTONIC, &cutoff_current);
@@ -3216,10 +3235,10 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
             early_return = true;
         }
     }
+#endif
     traverse(each_op, (visitproc)cascadingvisitor, combined);
     // *combined = (*combined & 0xFFFFFFFF00000000) | last_length;
 }
-
 unsigned long max_num_hot = 0; // accumulated hot objs for 10 fast cycles
 double cur_hot_in_all = 0.0;   // current ratio of changed op within old_num_op
 bool forced_promo = false;     // whether to force promotion
@@ -3239,6 +3258,27 @@ int check_in_global_helper(uintptr_t op)
     }
 }
 
+void populate_hotness_runtime(int scan_idx)
+{
+    // if (all_temps[i].diffs[scan_idx] == 127)
+    // {
+    //     all_temps[i].diffs[NUM_SLOTS - 1] += 1;
+    // }
+    // else if (all_temps[i].diffs[scan_idx] == 4)
+    // {
+    //     all_temps[i].diffs[NUM_SLOTS - 1] += 2;
+    // }
+    // else if (all_temps[i].diffs[scan_idx] == 5)
+    // {
+    //     all_temps[i].diffs[NUM_SLOTS - 1] += 3;
+    // }
+    // else if (all_temps[i].diffs[scan_idx] == 6)
+    // {
+    //     all_temps[i].diffs[NUM_SLOTS - 1] += 4;
+    // }
+    // cur_fast_num_hot++;
+}
+
 void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
 {
     fprintf(stderr, "sampling from: %u, to: %u\n", start_idx, end_idx);
@@ -3255,6 +3295,7 @@ void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
             all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
             if (all_temps[i].diffs[scan_idx] != 0)
             {
+                // populate_hotness_runtime(scan_idx);
                 if (all_temps[i].diffs[scan_idx] == 127)
                 {
                     all_temps[i].diffs[NUM_SLOTS - 1] += 1;
@@ -3392,14 +3433,14 @@ void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, b
     //     insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
     // }
     // if (reset_all_temps == 1) // reset and new
-    // {   
+    // {
     //     fprintf(stderr, "reset / first\n");
     //     for (unsigned int i = start_idx; i < end_idx; i++)
     //     {
     //         short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
     //         insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, 0);
     //     }
-    // } 
+    // }
     // else if (reset_all_temps == 2)
     {
         // fprintf(stderr, "realloc-ed\n");
@@ -3407,7 +3448,7 @@ void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, b
         for (unsigned int i = start_idx; i < prev_num_op; i++)
         {
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness); 
+            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
         }
         for (unsigned int i = prev_num_op; i < old_num_op; i++)
         {
@@ -3529,7 +3570,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     {
         fprintf(stderr, "likely to be in CXL\n");
         is_dram_pressure = true; // mark in CXL
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "likely to be in DRAM\n");
     }
     align_obj_2_page_bd_revised(start_idx, end_idx, is_dram_pressure);
@@ -3544,8 +3587,6 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     void **promote_pages = calloc(max_size, sizeof(void *));
     // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
     // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
-
-    
 
     if (very_first_mig)
     {
@@ -3565,64 +3606,64 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             demo_size = promo_size;
         // if () // not enough room for promotion && demo are
         // {
-            if (very_first_demote)
+        if (very_first_demote)
+        {
+            last_demote_pages = kh_init(ptrset_dup);
+            for (int i = 0; i < demo_size; i++)
             {
-                last_demote_pages = kh_init(ptrset_dup);
-                for (int i = 0; i < demo_size; i++)
+                kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+            }
+            if (demo_size < max_size)
+            {
+                demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
+            }
+            cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
+            is_migration = true;
+            very_first_demote = false;
+        }
+        else
+        {
+            size_t prev_demo_size = kh_size(last_demote_pages);
+            size_t dupCount = 0;
+            for (int i = 0; i < demo_size; i++)
+            {
+                khint_t k = kh_get(ptrset_dup, last_demote_pages, demote_pages[i]);
+                if (k != kh_end(last_demote_pages))
                 {
-                    kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+                    dupCount++;
                 }
+            }
+            double intersection_ratio = (double)dupCount / prev_demo_size;
+            fprintf(stderr, "intersection_ratio: %.3f\n", intersection_ratio);
+            if (intersection_ratio > 0.6)
+            {
+                // demote current demote_pages
                 if (demo_size < max_size)
                 {
                     demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
                 }
                 cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
                 is_migration = true;
-                very_first_demote = false;
+                kh_destroy(ptrset_dup, last_demote_pages);
+                last_demote_pages = kh_init(ptrset_dup);
+                for (int i = 0; i < demo_size; i++)
+                {
+                    kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+                }
             }
             else
             {
-                size_t prev_demo_size = kh_size(last_demote_pages);
-                size_t dupCount = 0;
+                kh_destroy(ptrset_dup, last_demote_pages);
+                last_demote_pages = kh_init(ptrset_dup);
                 for (int i = 0; i < demo_size; i++)
                 {
-                    khint_t k = kh_get(ptrset_dup, last_demote_pages, demote_pages[i]);
-                    if (k != kh_end(last_demote_pages))
-                    {
-                        dupCount++;
-                    }
+                    kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
                 }
-                double intersection_ratio = (double)dupCount / prev_demo_size;
-                fprintf(stderr, "intersection_ratio: %.3f\n", intersection_ratio);
-                if (intersection_ratio > 0.6)
-                {
-                    // demote current demote_pages
-                    if (demo_size < max_size)
-                    {
-                        demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
-                    }
-                    cur_migration_time += do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
-                    is_migration = true;
-                    kh_destroy(ptrset_dup, last_demote_pages);
-                    last_demote_pages = kh_init(ptrset_dup);
-                    for (int i = 0; i < demo_size; i++)
-                    {
-                        kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
-                    }
-                }
-                else
-                {
-                    kh_destroy(ptrset_dup, last_demote_pages);
-                    last_demote_pages = kh_init(ptrset_dup);
-                    for (int i = 0; i < demo_size; i++)
-                    {
-                        kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
-                    }
-                    demo_size = 0;
-                    free(demote_pages);
-                    demote_pages = NULL;
-                }
+                demo_size = 0;
+                free(demote_pages);
+                demote_pages = NULL;
             }
+        }
         // }
     }
     else
@@ -3642,10 +3683,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     //     }
     //     else
     //     {
-            
+
     //     }
     // }
-    
 
     // resize promo size if DRAM is scarce
     int free_dram_size = check_dram_free();
@@ -3706,6 +3746,7 @@ int check_dram_free()
 //  1: trigger scan
 int trigger_bk()
 {
+    return 1; // dummy switch quick testing
     long long total_dram_size;
     long long free_dram_size;
     total_dram_size = numa_node_size(DRAM_MASK, NULL);
@@ -3735,6 +3776,13 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
+    return 0;
+#ifdef PARTIAL_SCAN
+    fprintf(stderr, "partial_scan defined\n");
+#else
+    fprintf(stderr, "doing whole scan\n");
+#endif
+
     global_bookkeep_args = (BookkeepArgs *)arg;
     if (numa_available() == -1 || numa_num_configured_nodes() < 2)
     {
@@ -3773,7 +3821,7 @@ void *manual_trigger_scan(void *arg)
     double total_migration_time = 0;
     double total_fast_time = 0.0;
     int total_fast_num = 0;
-    
+
     struct timespec start_fast, end_fast;
     clock_gettime(CLOCK_MONOTONIC, &global_start);
     // int scan_stat = 0;
@@ -3825,7 +3873,11 @@ void *manual_trigger_scan(void *arg)
             else if (reset_all_temps == 2)
             {
                 fprintf(stderr, "previous part need record, new part need only update prev_recnt\n");
+#ifdef PARTIAL_SCAN
                 record_temp(fast_scan_idx, 0, partition);
+#else
+                record_temp(fast_scan_idx, 0, prev_num_op);
+#endif
                 for (int i = prev_num_op; i < old_num_op; i++)
                 {
                     if (sigsetjmp(jump_buffer, 1) == 0)
@@ -3841,15 +3893,22 @@ void *manual_trigger_scan(void *arg)
             }
             else
             { // use old_num_op and record all
+#ifdef PARTIAL_SCAN
                 record_temp(fast_scan_idx, 0, partition);
+#else
+                record_temp(fast_scan_idx, 0, old_num_op);
+#endif
             }
         }
         else if (fast_scan_idx == 1)
         {
             if (reset_all_temps == 1 || reset_all_temps == 2)
             {
+#ifdef PARTIAL_SCAN
                 for (int i = partition; i < partition * 2; i++)
-                // for (int i = 0; i < old_num_op; i++)
+#else
+                for (int i = 0; i < old_num_op; i++)
+#endif
                 {
                     if (all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF))
                     {
@@ -3869,7 +3928,8 @@ void *manual_trigger_scan(void *arg)
                             // {
                             //     prev_changed_min = foundInner;
                             // }
-                            if (all_temps[i].diffs[1] == 127)
+                            // populate_hotness_runtime(fast_scan_idx);
+                            if (all_temps[i].diffs[fast_scan_idx] == 127)
                             {
                                 all_temps[i].diffs[NUM_SLOTS - 1] += 1;
                             }
@@ -3894,15 +3954,22 @@ void *manual_trigger_scan(void *arg)
             }
             else
             { // 0 --> slow scan not triggered
+#ifdef PARTIAL_SCAN
                 record_temp(fast_scan_idx, partition, partition * 2);
+#else
+                record_temp(fast_scan_idx, 0, old_num_op);
+#endif
             }
         }
         else if (fast_scan_idx == 2)
         {
             if (reset_all_temps == 1 || reset_all_temps == 2)
             {
+#ifdef PARTIAL_SCAN
                 for (int i = partition * 2; i < partition * 3; i++)
-                // for (int i = 0; i < old_num_op; i++)
+#else
+                for (int i = 0; i < old_num_op; i++)
+#endif
                 {
                     // foundInner = (uintptr_t)all_temps[i].op;
                     // if (foundInner > prev_changed_min && foundInner < prev_changed_max)
@@ -3916,7 +3983,7 @@ void *manual_trigger_scan(void *arg)
                             all_temps[i].diffs[2] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
                             if (all_temps[i].diffs[2] != 0)
                             {
-                                if (all_temps[i].diffs[2] == 127)
+                                if (all_temps[i].diffs[fast_scan_idx] == 127)
                                 {
                                     all_temps[i].diffs[NUM_SLOTS - 1] += 1;
                                 }
@@ -3946,13 +4013,20 @@ void *manual_trigger_scan(void *arg)
             }
             else
             { // 0: use old_num_op
+#ifdef PARTIAL_SCAN
                 record_temp(fast_scan_idx, partition * 2, partition * 3);
+#else
+                record_temp(fast_scan_idx, 0, old_num_op);
+#endif
             }
         }
         else if (fast_scan_idx != NUM_SLOTS - 1) // [0:6]
         {
+#ifdef PARTIAL_SCAN
             record_temp(fast_scan_idx, partition * fast_scan_idx, partition * (fast_scan_idx + 1));
-            // record_temp(fast_scan_idx, old_num_op);
+#else
+            record_temp(fast_scan_idx, 0, old_num_op);
+#endif
         }
 
         clock_gettime(CLOCK_MONOTONIC, &end_fast);
@@ -4003,18 +4077,18 @@ void *manual_trigger_scan(void *arg)
             //     fprintf(stderr, "Attention! Enable forced promotion...\n");
             //     forced_promo = true;
             // }
-            // determine if we want to skip future slow trace
-            clock_gettime(CLOCK_MONOTONIC, &global_current);
-            global_elapsed = global_current.tv_sec - global_start.tv_sec;
-            global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
-            //
-            if ( total_num_slow % 3 == 0 && total_slow_time > (double)global_elapsed / (100 / global_bookkeep_args->skip_future_slow_thresh))
-            {
-                fprintf(stderr, "skipping future slow\n");
-                skip_future_slow = true;
-            }
 
-            cur_mig_time = try_trigger_migration_revised(0, partition * 7);
+            // determine if we want to skip future slow trace
+            // clock_gettime(CLOCK_MONOTONIC, &global_current);
+            // global_elapsed = global_current.tv_sec - global_start.tv_sec;
+            // global_elapsed += (global_current.tv_nsec - global_start.tv_nsec) / 1000000000.0;
+            // if (total_num_slow % 3 == 0 && total_slow_time > (double)global_elapsed / (100 / global_bookkeep_args->skip_future_slow_thresh))
+            // {
+            //     fprintf(stderr, "skipping future slow\n");
+            //     skip_future_slow = true;
+            // }
+
+            // cur_mig_time = try_trigger_migration_revised(0, partition * 7); // do migration
             total_migration_time += cur_mig_time;
             fprintf(stderr, "total_migration_time: %.3f\n", total_migration_time);
             max_num_hot = 0;
@@ -4036,19 +4110,19 @@ void *manual_trigger_scan(void *arg)
                     //         break;
                     //     }
                     // }
-                    if (all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK)
+                    if ((all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK) && !(all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF)))
                         print_obj = true;
                     uintptr_t found_inner = (uintptr_t)all_temps[i].op;
                     // if (check_in_global_helper(found_inner))
-                    if (print_obj)
+                    // if (print_obj)
                     {
                         fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
                         // fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
-                        // for (int j = 0; j < NUM_SLOTS - 1; j++)
-                        // {
-                        //     fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
-                        // }
-                        // fprintf(global_bookkeep_args->fd, "\t");
+                        for (int j = 0; j < NUM_SLOTS - 1; j++)
+                        {
+                            fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
+                        }
+                        fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK);
                         // PyObject_Print(all_temps[i].op, global_bookkeep_args->fd, 0);
                         fprintf(global_bookkeep_args->fd, "\n");
                     }
@@ -4057,20 +4131,20 @@ void *manual_trigger_scan(void *arg)
                 PyGILState_Release(gstate);
             }
         }
-    skip_fast_scans:
-        if ((cur_fast_time > 2.5 && cur_hot_in_all < 0.05) || (fast_scan_idx == -1 && cur_mig_time < 0.001))
-        {
-            fprintf(stderr, "relaxed fast/slow, sleep longer\n");
-            // usleep(global_bookkeep_args->sample_dur * 2);
-            usleep((int)cur_fast_time * 1000000);
-        }
-        else
-            usleep(global_bookkeep_args->sample_dur);
+        // skip_fast_scans:
+        //     if ((cur_fast_time > 2.5 && cur_hot_in_all < 0.05) || (fast_scan_idx == -1 && cur_mig_time < 0.001))
+        //     {
+        //         fprintf(stderr, "relaxed fast/slow, sleep longer\n");
+        //         // usleep(global_bookkeep_args->sample_dur * 2);
+        //         usleep((int)cur_fast_time * 1000000);
+        //     }
+        //     else
+        usleep(global_bookkeep_args->sample_dur);
     }
     numa_set_localalloc();
     terminate_flag_refchain = 0;
     enable_bk = 0;
-    fprintf(stderr, "Summary: total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f\n", total_num_slow, total_slow_time, total_migration_time);
+    fprintf(stderr, "Summary: total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f, num_gc_cycles: %ld, total_new_op_num: %ld\n", total_num_slow, total_slow_time, total_migration_time, num_gc_cycles, total_new_op_num);
     free(all_temps);
     // numa_free(all_temps, old_num_op * sizeof(OBJ_TEMP));
     kh_destroy(ptrset_dup, last_demote_pages);

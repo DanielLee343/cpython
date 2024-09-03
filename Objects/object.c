@@ -2818,7 +2818,6 @@ extern "C"
         _Py_ForgetReference(op);
 #endif
         (*dealloc)(op);
-        // op->hotness = 0; // cannot do anything here
         if (enable_bk)
         {
             // erase_from_global((uintptr_t)op);
