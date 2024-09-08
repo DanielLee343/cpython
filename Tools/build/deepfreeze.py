@@ -142,7 +142,8 @@ class Printer:
 
     def object_head(self, typename: str) -> None:
         with self.block(".ob_base =", ","):
-            self.write(f".ob_refcnt = _Py_IMMORTAL_REFCNT,")
+            # self.write(f".ob_refcnt = _Py_IMMORTAL_REFCNT,")
+            self.write(f".ob_refcnt_split[PY_BIG_ENDIAN] = _Py_IMMORTAL_REFCNT,")
             self.write(f".ob_type = &{typename},")
 
     def object_var_head(self, typename: str, size: int) -> None:

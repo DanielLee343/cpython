@@ -26,7 +26,6 @@ extern "C"
     int check_in_map(uintptr_t value);
     void erase_from_map(uintptr_t value);
     void free_map();
-    void reset_all_temps_map();
     unsigned int get_map_size();
 
     // pages_loc_hotness
@@ -38,12 +37,12 @@ extern "C"
     void free_pages();
     unsigned int get_pages_size();
     // bool get_location_pages(void *page);
-    // void set_location_pages(void *page, bool location);
     void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
     void populate_mig_pages_wo_checking(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
     void get_page_hotness_bound(short *min, short *max);
     void print_all_pages_hotness();
     void reset_pages_hotness();
+    void page_temp_cooling(float cooling_weight);
     void set_location_pages(uintptr_t page, bool location);
 
 #ifdef __cplusplus

@@ -2366,7 +2366,8 @@ extern "C"
             _PyTraceMalloc_NewReference(op);
         }
         // Skip the immortal object check in Py_SET_REFCNT; always set refcnt to 1
-        op->ob_refcnt = 1;
+        // op->ob_refcnt = 1;
+        op->ob_refcnt_split[PY_BIG_ENDIAN] = 1;
 #ifdef Py_TRACE_REFS
         _Py_AddToAllObjects(op, 1);
 #endif

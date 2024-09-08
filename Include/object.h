@@ -180,7 +180,7 @@ check by comparing the reference count field to the immortality reference count.
 #endif
 
             PyTypeObject *ob_type;
-        unsigned int hotness;
+        // unsigned int hotness;
     };
 
 /* Cast argument to PyObject* type. */
@@ -201,14 +201,16 @@ check by comparing the reference count field to the immortality reference count.
 
     static inline Py_ssize_t Py_REFCNT(PyObject *ob)
     {
-        return ob->ob_refcnt;
+        // return ob->ob_refcnt;
+        return ob->ob_refcnt_split[PY_BIG_ENDIAN];
     }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API + 0 < 0x030b0000
 #define Py_REFCNT(ob) Py_REFCNT(_PyObject_CAST(ob))
 #endif
     static inline Py_ssize_t Py_HOTNESS(PyObject *ob)
     {
-        return ob->hotness;
+        // return ob->hotness;
+        return ob->ob_refcnt_split[PY_LITTLE_ENDIAN];
     }
 #define Py_HOTNESS(ob) Py_HOTNESS(_PyObject_CAST(ob))
     // bpo-39573: The Py_SET_TYPE() function must be used to set an object type.
@@ -238,9 +240,11 @@ check by comparing the reference count field to the immortality reference count.
     static inline Py_ALWAYS_INLINE int _Py_IsImmortal(PyObject *op)
     {
 #if SIZEOF_VOID_P > 4
-        return _Py_CAST(PY_INT32_T, op->ob_refcnt) < 0;
+        // return _Py_CAST(PY_INT32_T, op->ob_refcnt) < 0;
+        return _Py_CAST(PY_INT32_T, op->ob_refcnt_split[PY_BIG_ENDIAN]) < 0;
 #else
-    return op->ob_refcnt == _Py_IMMORTAL_REFCNT;
+    // return op->ob_refcnt == _Py_IMMORTAL_REFCNT;
+    return op->ob_refcnt_split[PY_BIG_ENDIAN] == _Py_IMMORTAL_REFCNT;
 #endif
     }
 #define _Py_IsImmortal(op) _Py_IsImmortal(_PyObject_CAST(op))
@@ -263,7 +267,8 @@ check by comparing the reference count field to the immortality reference count.
         {
             return;
         }
-        ob->ob_refcnt = refcnt;
+        // ob->ob_refcnt = refcnt;
+        ob->ob_refcnt_split[PY_BIG_ENDIAN] = refcnt;
     }
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API + 0 < 0x030b0000
 #define Py_SET_REFCNT(ob, refcnt) Py_SET_REFCNT(_PyObject_CAST(ob), (refcnt))
@@ -652,7 +657,7 @@ check by comparing the reference count field to the immortality reference count.
 
     static inline Py_ALWAYS_INLINE void Py_INCREF(PyObject *op)
     {
-        op->hotness++;
+        // op->hotness++;// start editing
 #if defined(Py_LIMITED_API) && (Py_LIMITED_API + 0 >= 0x030c0000 || defined(Py_REF_DEBUG))
         // Stable ABI implements Py_INCREF() as a function call on limited C API
         // version 3.12 and newer, and on Python built in debug mode. _Py_IncRef()
@@ -681,9 +686,11 @@ check by comparing the reference count field to the immortality reference count.
     {
         return;
     }
-    op->ob_refcnt++;
+    // op->ob_refcnt++;
+    op->ob_refcnt_split[PY_BIG_ENDIAN]++;
 
 #endif
+    op->ob_refcnt_split[PY_LITTLE_ENDIAN]++;
     _Py_INCREF_STAT_INC();
 #ifdef Py_REF_DEBUG
     _Py_INCREF_IncRefTotal();
@@ -701,20 +708,23 @@ check by comparing the reference count field to the immortality reference count.
     // Py_DecRef() accepts NULL whereas _Py_IncRef() doesn't.
     static inline void Py_DECREF(PyObject *op)
     {
-        op->hotness++;
+        // op->hotness++;
 #if Py_LIMITED_API + 0 >= 0x030a00A7
         _Py_DecRef(op);
 #else
         Py_DecRef(op);
 #endif
+        op->ob_refcnt_split[PY_LITTLE_ENDIAN]++;
     }
 #define Py_DECREF(op) Py_DECREF(_PyObject_CAST(op))
 
 #elif defined(Py_REF_DEBUG)
 static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
 {
-    op->hotness++;
-    if (op->ob_refcnt <= 0)
+    // op->hotness++;
+    op->ob_refcnt_split[PY_LITTLE_ENDIAN]++;
+    // if (op->ob_refcnt <= 0)
+    if (op->ob_refcnt_split[PY_BIG_ENDIAN] <= 0)
     {
         _Py_NegativeRefcount(filename, lineno, op);
     }
@@ -724,7 +734,8 @@ static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
     }
     _Py_DECREF_STAT_INC();
     _Py_DECREF_DecRefTotal();
-    if (--op->ob_refcnt == 0)
+    // if (--op->ob_refcnt == 0)
+    if (--op->ob_refcnt_split[PY_BIG_ENDIAN] == 0)
     {
         _Py_Dealloc(op);
     }
@@ -734,7 +745,8 @@ static inline void Py_DECREF(const char *filename, int lineno, PyObject *op)
 #else
 static inline Py_ALWAYS_INLINE void Py_DECREF(PyObject *op)
 {
-    op->hotness++;
+    // op->hotness++;
+    op->ob_refcnt_split[PY_LITTLE_ENDIAN]++;
     // Non-limited C API and limited C API for Python 3.9 and older access
     // directly PyObject.ob_refcnt.
     if (_Py_IsImmortal(op))
@@ -742,7 +754,8 @@ static inline Py_ALWAYS_INLINE void Py_DECREF(PyObject *op)
         return;
     }
     _Py_DECREF_STAT_INC();
-    if (--op->ob_refcnt == 0)
+    // if (--op->ob_refcnt == 0)
+    if (--op->ob_refcnt_split[PY_BIG_ENDIAN] == 0)
     {
         _Py_Dealloc(op);
     }

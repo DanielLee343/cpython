@@ -12,7 +12,7 @@ extern "C" void cppDefaultSortAsc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diffs[7] & 0x3F) > (a.diffs[7] & 0x3F); // Sort asc
+                  return (b.diff & 0x7F) > (a.diff & 0x7F); // Sort asc
               });
 }
 
@@ -20,17 +20,9 @@ extern "C" void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); // Sort desc
+                  return (b.diff & 0x7F) < (a.diff & 0x7F); // Sort desc
               });
 }
-
-// extern "C" void cppTopKSort(OBJ_TEMP *all_temps, size_t n)
-// {
-//     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
-//               {
-//                   return (b.diffs[7] & 0x3F) < (a.diffs[7] & 0x3F); // Sort desc, only top k
-//               });
-// }
 
 // sort the addr in ascending order
 extern "C" void sortRawAddr(uintptr_t *ptr, size_t n)

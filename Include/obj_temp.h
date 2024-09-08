@@ -11,9 +11,9 @@ typedef struct
 {
     PyObject *op;             // 8
     unsigned int prev_refcnt; // 4
-    uint8_t diffs[NUM_SLOTS]; // 8
-    // size_t cur_sizeof; // 8, but no need for now
-} OBJ_TEMP;
+    // uint8_t diffs[NUM_SLOTS]; // 8
+    uint8_t diff; // 1 ( + 3)
+} OBJ_TEMP;       // total 12
 
 #ifdef __cplusplus
 extern "C"

@@ -37,10 +37,11 @@ KHASH_SET_INIT_INT32(ptrset_dup)
     KLIST_INIT(ptrlist, PyObject *, __int_free)
 #include "kvec.h"
 
-#define _PyObject_HEAD_INIT(type)             \
-    {                                         \
-        _PyObject_EXTRA_INIT                  \
-            .ob_refcnt = _Py_IMMORTAL_REFCNT, \
+// .ob_refcnt = _Py_IMMORTAL_REFCNT,
+#define _PyObject_HEAD_INIT(type)                                  \
+    {                                                              \
+        _PyObject_EXTRA_INIT                                       \
+            .ob_refcnt_split[PY_BIG_ENDIAN] = _Py_IMMORTAL_REFCNT, \
         .ob_type = (type)},
 #define _PyVarObject_HEAD_INIT(type, size)   \
     {                                        \
@@ -77,7 +78,8 @@ KHASH_SET_INIT_INT32(ptrset_dup)
 #ifdef Py_REF_DEBUG
         _Py_AddRefTotal(_PyInterpreterState_GET(), n);
 #endif
-        op->ob_refcnt += n;
+        // op->ob_refcnt += n;
+        op->ob_refcnt_split[PY_BIG_ENDIAN] += n;
     }
 #define _Py_RefcntAdd(op, n) _Py_RefcntAdd(_PyObject_CAST(op), n)
 
@@ -85,7 +87,8 @@ KHASH_SET_INIT_INT32(ptrset_dup)
     {
         if (op)
         {
-            op->ob_refcnt = _Py_IMMORTAL_REFCNT;
+            // op->ob_refcnt = _Py_IMMORTAL_REFCNT;
+            op->ob_refcnt_split[PY_BIG_ENDIAN] = _Py_IMMORTAL_REFCNT;
         }
     }
 #define _Py_SetImmortal(op) _Py_SetImmortal(_PyObject_CAST(op))
@@ -95,8 +98,10 @@ KHASH_SET_INIT_INT32(ptrset_dup)
     {
         if (op)
         {
-            assert(op->ob_refcnt == _Py_IMMORTAL_REFCNT);
-            op->ob_refcnt = 1;
+            // assert(op->ob_refcnt == _Py_IMMORTAL_REFCNT);
+            // op->ob_refcnt = 1;
+            assert(op->ob_refcnt_split[PY_BIG_ENDIAN] == _Py_IMMORTAL_REFCNT);
+            op->ob_refcnt_split[PY_BIG_ENDIAN] = 1;
             Py_DECREF(op);
         }
     }
@@ -118,9 +123,11 @@ KHASH_SET_INIT_INT32(ptrset_dup)
 #ifdef Py_REF_DEBUG
         _Py_DEC_REFTOTAL(_PyInterpreterState_GET());
 #endif
-        if (--op->ob_refcnt != 0)
+        // if (--op->ob_refcnt != 0)
+        if (--op->ob_refcnt_split[PY_BIG_ENDIAN] != 0)
         {
-            assert(op->ob_refcnt > 0);
+            // assert(op->ob_refcnt > 0);
+            assert(op->ob_refcnt_split[PY_BIG_ENDIAN] > 0);
         }
         else
         {
@@ -142,9 +149,11 @@ KHASH_SET_INIT_INT32(ptrset_dup)
 #ifdef Py_REF_DEBUG
         _Py_DEC_REFTOTAL(_PyInterpreterState_GET());
 #endif
-        op->ob_refcnt--;
+        // op->ob_refcnt--;
+        op->ob_refcnt_split[PY_BIG_ENDIAN]--;
 #ifdef Py_DEBUG
-        if (op->ob_refcnt <= 0)
+        // if (op->ob_refcnt <= 0)
+        if (op->ob_refcnt_split[PY_BIG_ENDIAN] <= 0)
         {
             _Py_FatalRefcountError("Expected a positive remaining refcount");
         }
@@ -185,7 +194,8 @@ KHASH_SET_INIT_INT32(ptrset_dup)
     _PyObject_Init(PyObject *op, PyTypeObject *typeobj)
     {
         assert(op != NULL);
-        op->hotness = 1;
+        // op->hotness = 1;
+        op->ob_refcnt_split[PY_LITTLE_ENDIAN] = 1;
         Py_SET_TYPE(op, typeobj);
         if (_PyType_HasFeature(typeobj, Py_TPFLAGS_HEAPTYPE))
         {

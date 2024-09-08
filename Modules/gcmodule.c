@@ -59,8 +59,12 @@ struct timespec global_start, global_current;
 static clock_t last_live_trace_time;
 static clock_t last_migrate_time;
 extern int enable_bk;
+bool very_first_demote = true;
+bool very_first_mig = true;
+khash_t(ptrset_dup) * last_demote_pages; // for lazy demotion
+double prev_c_w_percent = 0.0;
 // unsigned long get_live_time_thresh;
-unsigned long num_gc_cycles = 0;
+unsigned long num_gc_cycles = 0, prev_gc_cycles = 0;
 struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
 int reset_all_temps = 1;
@@ -111,7 +115,6 @@ typedef struct cur_survived_node
 
 PyGC_Head *global_old;
 static int gen_idx = -1;
-int check_dram_free();
 
 typedef struct
 {
@@ -1478,7 +1481,7 @@ double try_cascading_old(int slow_idx)
 
     if (!enable_bk || !global_old || gen_idx == -1)
     {
-        fprintf(stderr, "returned\n");
+        fprintf(stderr, "unlikely, returned\n");
         return;
     }
     PyGILState_STATE gstate = PyGILState_Ensure();
@@ -1514,7 +1517,7 @@ double try_cascading_old(int slow_idx)
     //     fprintf(stderr, "GEN %d: %d\n", i, num_ctn_obj);
     // }
     for (int i = 0; i < NUM_GENERATIONS; i++)
-    {
+    { // traverse all 3 lists
         // uintptr_t local_lowest_op = UINTPTR_MAX;
         // uintptr_t cur_gen_low_bound = gen_id_bound[i].low;
         tracing_head = GEN_HEAD(gcstate, i);
@@ -1579,8 +1582,6 @@ int gen_temps()
         for (int i = 0; i < num_op; i++)
         {
             all_temps[i].op = kv_A(local_ptr_vec, i);
-            // all_temps[i].prev_refcnt = 0;
-            // all_temps[i].diffs[0] = 1; // newly init ones, mark diffs[0] as 1
         }
         old_num_op = num_op;
         fprintf(stderr, "first time appended %u nodes\n", num_op);
@@ -1606,10 +1607,7 @@ int gen_temps()
         {
             all_temps[i].op = kv_A(local_ptr_vec, i - old_num_op);
             all_temps[i].prev_refcnt = 0;
-            for (int i = 0; i < 8; i++)
-            {
-                all_temps[i].diffs[i] = 0;
-            }
+            all_temps[i].diff = 0;
         }
         old_num_op = new_num_op;
         fprintf(stderr, "newly appended: %u, total: %u\n", num_op, old_num_op);
@@ -1656,7 +1654,6 @@ static int try_trigger_slow_scan()
     struct timespec start, end;
     int ret;
     unsigned int cur_global_size = get_global_size();
-    fprintf(stderr, "num_gc_cycles: %ld\n", num_gc_cycles);
     fprintf(stderr, "global_try2_sched: %ld\n", global_try2_sched);
     fprintf(stderr, "recent num_container_collected: %lu, global size: %d\n", num_container_collected, cur_global_size);
     double div = (double)old_num_op / cur_global_size;
@@ -1665,38 +1662,26 @@ static int try_trigger_slow_scan()
     {
         is_migration = false;
         // reset_pages_hotness();
+        page_temp_cooling(0.5);
         // fast path, gc not aggresive, no need to trigger slow
-        fprintf(stderr, "clearing diffs in metadata\n");
-        // if (!very_first_bk && (global_try2_sched < 100 && num_container_collected < 100000))
-        // {
-        //     for (unsigned int i = 0; i < old_num_op; i++)
-        //     {
-        //         for (int i = 0; i < NUM_SLOTS; i++)
-        //         {
-        //             all_temps[i].diffs[i] = 0;
-        //         }
-        //     }
-        //     global_try2_sched = 0;
-        //     num_container_collected = 0;
-        //     fprintf(stderr, "early return\n");
-        //     return 0;
-        // }
-        // else
+        fprintf(stderr, "clearing diff in metadata\n");
         {
             for (unsigned int i = 0; i < old_num_op; i++)
             {
-                for (int i = 0; i < NUM_SLOTS; i++)
-                {
-                    all_temps[i].diffs[i] = 0;
-                }
+                all_temps[i].diff = 0; // why need?
             }
         }
     }
+    fprintf(stderr, "num_gc_cycles: %ld\n", num_gc_cycles);
+    if ((num_gc_cycles - prev_gc_cycles < 2000) && !very_first_bk)
+        skip_future_slow = true;
+    prev_gc_cycles = num_gc_cycles;
+
     if (skip_future_slow)
     {
         global_try2_sched = 0;
         num_container_collected = 0;
-        fprintf(stderr, "skip slow and return\n");
+        fprintf(stderr, "skipping next slow\n");
         skip_future_slow = false;
         return 0;
     }
@@ -3241,7 +3226,6 @@ void update_recursive_visitor(PyObject *each_op, unsigned long *combined)
 }
 unsigned long max_num_hot = 0; // accumulated hot objs for 10 fast cycles
 double cur_hot_in_all = 0.0;   // current ratio of changed op within old_num_op
-bool forced_promo = false;     // whether to force promotion
 unsigned int zero_hot_num = 0;
 
 int check_in_global_helper(uintptr_t op)
@@ -3258,26 +3242,7 @@ int check_in_global_helper(uintptr_t op)
     }
 }
 
-void populate_hotness_runtime(int scan_idx)
-{
-    // if (all_temps[i].diffs[scan_idx] == 127)
-    // {
-    //     all_temps[i].diffs[NUM_SLOTS - 1] += 1;
-    // }
-    // else if (all_temps[i].diffs[scan_idx] == 4)
-    // {
-    //     all_temps[i].diffs[NUM_SLOTS - 1] += 2;
-    // }
-    // else if (all_temps[i].diffs[scan_idx] == 5)
-    // {
-    //     all_temps[i].diffs[NUM_SLOTS - 1] += 3;
-    // }
-    // else if (all_temps[i].diffs[scan_idx] == 6)
-    // {
-    //     all_temps[i].diffs[NUM_SLOTS - 1] += 4;
-    // }
-    // cur_fast_num_hot++;
-}
+#define get_growth(op) (op->ob_refcnt_split[PY_LITTLE_ENDIAN])
 
 void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
 {
@@ -3286,23 +3251,23 @@ void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
     // fprintf(stderr, "prev_scan_idx: %d, cur scan_idx: %d\n", prev_scan_idx, scan_idx);
     for (int i = start_idx; i < end_idx; i++)
     {
-        if (all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF))
+        if (all_temps[i].diff & (1 << DROP_OUT_OFF))
         {
             continue;
         }
         if (sigsetjmp(jump_buffer, 1) == 0)
         {
-            all_temps[i].diffs[scan_idx] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-            if (all_temps[i].diffs[scan_idx] != 0)
+            // uint8_t diff = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+            uint8_t changes = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+            if (changes != 0)
             {
-                // populate_hotness_runtime(scan_idx);
-                if (all_temps[i].diffs[scan_idx] == 127)
+                if (changes == 127)
                 {
-                    all_temps[i].diffs[NUM_SLOTS - 1] += 1;
+                    all_temps[i].diff += 1;
                 }
                 else
                 {
-                    all_temps[i].diffs[NUM_SLOTS - 1] += 2;
+                    all_temps[i].diff += 2;
                 }
                 cur_fast_num_hot++;
             }
@@ -3310,11 +3275,11 @@ void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
             {
                 zero_hot_num++;
             }
-            all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+            all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
         }
         else
         {
-            all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF); // segfualt occured, mark it as drop out
+            all_temps[i].diff |= (1 << DROP_OUT_OFF); // segfualt occured, mark it as drop out
             not_in_global_set++;
         }
     }
@@ -3335,13 +3300,13 @@ void sort_dnf(int *low, int *mid, int *high)
     // fprintf(stderr, "before low: %d, mid: %d, high: %d\n", *low, *mid, *high);
     while (*mid <= *high)
     {
-        if ((all_temps[*mid].diffs[NUM_SLOTS - 1] & HOTNESS_MASK) < 1)
+        if ((all_temps[*mid].diff & HOTNESS_MASK) < 1)
         {
             swap(&all_temps[*low], &all_temps[*mid]);
             (*low)++;
             (*mid)++;
         }
-        else if ((all_temps[*mid].diffs[NUM_SLOTS - 1] & HOTNESS_MASK) < 7) // doesn't matter since we are not using
+        else if ((all_temps[*mid].diff & HOTNESS_MASK) < 7) // doesn't matter since we are not using
         {
             (*mid)++;
         }
@@ -3360,7 +3325,7 @@ double do_migration(void **pages, int num_pages, int dest_node)
     // int *nodes = numa_alloc_onnode(num_pages * sizeof(int), 0);
     int *status = calloc(num_pages, sizeof(int));
     // int *status = numa_alloc_onnode(num_pages * sizeof(int), 0);
-    memset(status, 0, num_pages * sizeof(int));
+    // memset(status, 0, num_pages * sizeof(int));
     if (dest_node == 0)
     {
         // promotion, to DRAM
@@ -3419,42 +3384,79 @@ int comparePageCount(const void *a, const void *b)
 {
     return ((PageCount *)b)->count - ((PageCount *)a)->count;
 }
+void page_cooling()
+{
+}
 
 void align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx, bool is_CXL)
 {
-    if (end_idx == 0)
+    assert(end_idx != 0);
+    if (very_first_mig)
     {
-        fprintf(stderr, "unlikely, error\n");
-        return;
-    }
-    // for (unsigned int i = start_idx; i < end_idx; i++)
-    // {
-    //     short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-    //     insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
-    // }
-    // if (reset_all_temps == 1) // reset and new
-    // {
-    //     fprintf(stderr, "reset / first\n");
-    //     for (unsigned int i = start_idx; i < end_idx; i++)
-    //     {
-    //         short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-    //         insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, 0);
-    //     }
-    // }
-    // else if (reset_all_temps == 2)
-    {
-        // fprintf(stderr, "realloc-ed\n");
-        fprintf(stderr, "%d - %d - %d\n", start_idx, prev_num_op, old_num_op);
-        for (unsigned int i = start_idx; i < prev_num_op; i++)
+        void **pages_arr = calloc(old_num_op, sizeof(void *));
+        int *status_arr = calloc(old_num_op, sizeof(int));
+        for (int i = 0; i < old_num_op; i++)
         {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            pages_arr[i] = (void *)all_temps[i].op;
+        }
+        int ret = move_pages(0, old_num_op, pages_arr, NULL, status_arr, 0);
+        if (ret != 0)
+        {
+            perror("move_pages failed");
+            free(pages_arr);
+            free(status_arr);
+            return;
+        }
+        for (unsigned int i = 0; i < old_num_op; i++)
+        {
+            short cur_op_hotness = all_temps[i].diff & HOTNESS_MASK;
+            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, status_arr[i]);
+        }
+        free(pages_arr);
+        free(status_arr);
+    }
+    else if (reset_all_temps == 0)
+    {
+        for (unsigned int i = 0; i < old_num_op; i++)
+        {
+            short cur_op_hotness = all_temps[i].diff & HOTNESS_MASK;
             insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+        }
+    }
+    else if (reset_all_temps == 2)
+    {
+        for (unsigned int i = 0; i < prev_num_op; i++)
+        {
+            short cur_op_hotness = all_temps[i].diff & HOTNESS_MASK;
+            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+        }
+        int new_op_num = old_num_op - prev_num_op;
+        assert(new_op_num > 0);
+        void **pages_arr = calloc(new_op_num, sizeof(void *));
+        int *status_arr = calloc(new_op_num, sizeof(int));
+        for (int i = 0; i < new_op_num; i++)
+        {
+            pages_arr[i] = (void *)all_temps[i + prev_num_op].op;
+        }
+        int ret = move_pages(0, new_op_num, pages_arr, NULL, status_arr, 0);
+        if (ret != 0)
+        {
+            perror("move_pages failed");
+            free(pages_arr);
+            free(status_arr);
+            return;
         }
         for (unsigned int i = prev_num_op; i < old_num_op; i++)
         {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, is_CXL);
+            short cur_op_hotness = all_temps[i].diff & HOTNESS_MASK;
+            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, status_arr[i - prev_num_op]);
         }
+        free(pages_arr);
+        free(status_arr);
+    }
+    else if (reset_all_temps == 1)
+    {
+        fprintf(stderr, "UNLIKELY!!! op set changed extensively? Check once!\n");
     }
 }
 
@@ -3503,17 +3505,24 @@ int count_duplicates(void **arr1, int size1, void **arr2, int size2)
     }
     return duplicates;
 }
+int check_dram_free()
+{
+    long long free_dram_size;
+    if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
+    {
+        fprintf(stderr, "Failed to get DRAM size");
+        return -1;
+    }
+    long long free_dram_size_mb = free_dram_size / 1048576; // Convert bytes to MB
+    // free_dram_size_mb = (free_dram_size_mb > RESERVED_MEMORY_MB) ? free_dram_size_mb - RESERVED_MEMORY_MB : 0;
+    return (int)free_dram_size_mb;
+}
 
-bool very_first_demote = true;
-bool very_first_mig = true;
-khash_t(ptrset_dup) * last_demote_pages; // for lazy demotion
-double prev_c_w_percent = 0.0;
 double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_idx)
 {
     struct timespec start, end;
     double elapsed;
 
-    // cur_hot_in_all = (double)max_num_hot / old_num_op;
     fprintf(stderr, "migration from %u to %u\n", start_idx, end_idx);
     fprintf(stderr, "--------start\n");
     uintptr_t *cold_arr = NULL, *hot_arr = NULL;
@@ -3521,25 +3530,21 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     int cold_warm_idx = 0, warm_hot_idx = 0, high = old_num_op - 1;
     bool is_dram_pressure = false;
     int ret;
-    if (forced_promo)
-    {
-        cold_warm_idx = 0;
-    }
-    else
-    {
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        // cppDefaultSortAsc(all_temps, old_num_op);
-        // sort_dnf(&cold_warm_idx, &warm_hot_idx, &high);
-        // for (int i = start_idx; i < end_idx; i++)
-        // {
-        //     if (!(all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK))
-        //         cold_warm_idx++;
-        // }
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        elapsed = end.tv_sec - start.tv_sec;
-        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-        fprintf(stderr, "DNF sort time: %.3f, for %lu\n", elapsed, old_num_op);
-    }
+
+    // {
+    //     clock_gettime(CLOCK_MONOTONIC, &start);
+    //     // cppDefaultSortAsc(all_temps, old_num_op);
+    //     // sort_dnf(&cold_warm_idx, &warm_hot_idx, &high);
+    //     // for (int i = start_idx; i < end_idx; i++)
+    //     // {
+    //     //     if (!(all_temps[i].diff & HOTNESS_MASK))
+    //     //         cold_warm_idx++;
+    //     // }
+    //     clock_gettime(CLOCK_MONOTONIC, &end);
+    //     elapsed = end.tv_sec - start.tv_sec;
+    //     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+    //     fprintf(stderr, "DNF sort time: %.3f, for %lu\n", elapsed, old_num_op);
+    // }
 
     // |   cold   |        warm     |        hot       |
     // (<-----domote candidates---->)(promote candidates)
@@ -3566,7 +3571,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     //     align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
     // }
     int cur_dram_free = check_dram_free();
-    if (cur_dram_free < 100)
+    if (cur_dram_free < 50)
     {
         fprintf(stderr, "likely to be in CXL\n");
         is_dram_pressure = true; // mark in CXL
@@ -3576,7 +3581,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         fprintf(stderr, "likely to be in DRAM\n");
     }
     align_obj_2_page_bd_revised(start_idx, end_idx, is_dram_pressure);
-
+    // return 0.0;
     // short min_hotness, max_hotness;
     // get_page_hotness_bound(&min_hotness, &max_hotness);
 
@@ -3588,24 +3593,22 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
     // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
 
-    if (very_first_mig)
-    {
-        populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_size, &promo_size, split);
-    }
-    else
+    // if (very_first_mig)
+    // {
+    //     populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_size, &promo_size, split);
+    // }
+    // else
     {
         populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
     }
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
-    // first do deomotion, if needed
     fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
-    if (is_dram_pressure && promo_size > cur_dram_free && demo_size > 0)
+    if (is_dram_pressure && (promo_size > cur_dram_free * 256) && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
     {
         if (promo_size < demo_size)
             demo_size = promo_size;
-        // if () // not enough room for promotion && demo are
-        // {
+        // if first time, demote anyway
         if (very_first_demote)
         {
             last_demote_pages = kh_init(ptrset_dup);
@@ -3623,6 +3626,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         }
         else
         {
+            // if not first demo, check intersection ratio
             size_t prev_demo_size = kh_size(last_demote_pages);
             size_t dupCount = 0;
             for (int i = 0; i < demo_size; i++)
@@ -3720,24 +3724,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // prev_c_w_percent = cur_c_w_percent; // remember to update prev_c_w_percent for next try_migration
     if (very_first_mig)
         very_first_mig = false;
-    if (forced_promo)
-        forced_promo = false;
     fprintf(stderr, "cur_migration_time: %.3f\n", cur_migration_time);
     fprintf(stderr, "--------end\n");
     return cur_migration_time;
-}
-
-int check_dram_free()
-{
-    long long free_dram_size;
-    if (numa_node_size(DRAM_MASK, &free_dram_size) <= 0)
-    {
-        fprintf(stderr, "Failed to get DRAM size");
-        return -1;
-    }
-    long long free_dram_size_mb = free_dram_size / 1048576; // Convert bytes to MB
-    // free_dram_size_mb = (free_dram_size_mb > RESERVED_MEMORY_MB) ? free_dram_size_mb - RESERVED_MEMORY_MB : 0;
-    return (int)free_dram_size_mb;
 }
 
 // return code:
@@ -3746,7 +3735,7 @@ int check_dram_free()
 //  1: trigger scan
 int trigger_bk()
 {
-    return 1; // dummy switch quick testing
+    // return 1; // dummy switch quick testing
     long long total_dram_size;
     long long free_dram_size;
     total_dram_size = numa_node_size(DRAM_MASK, NULL);
@@ -3768,7 +3757,7 @@ int trigger_bk()
             return 1;
         }
 
-        fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, free_dram_size_mb);
+        // fprintf(stderr, "freePercentage: %.2f, no need to offload, free_dram_size: %.2f\n", freePercentage, free_dram_size_mb);
         usleep(500000);
     }
     return 0; // terminated by user
@@ -3776,7 +3765,6 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
-    return 0;
 #ifdef PARTIAL_SCAN
     fprintf(stderr, "partial_scan defined\n");
 #else
@@ -3843,6 +3831,7 @@ void *manual_trigger_scan(void *arg)
         if (fast_scan_idx == -1)
         {
             reset_all_temps = try_trigger_slow_scan();
+            fprintf(stderr, "reset_all_temps: %d\n", reset_all_temps);
             if (reset_all_temps == -1)
             {
                 usleep(2000000);
@@ -3861,11 +3850,11 @@ void *manual_trigger_scan(void *arg)
                 {
                     if (sigsetjmp(jump_buffer, 1) == 0)
                     {
-                        all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                        all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
                     }
                     else
                     {
-                        all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF);
+                        all_temps[i].diff |= (1 << DROP_OUT_OFF);
                         not_in_global_set++;
                     }
                 }
@@ -3882,11 +3871,11 @@ void *manual_trigger_scan(void *arg)
                 {
                     if (sigsetjmp(jump_buffer, 1) == 0)
                     {
-                        all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                        all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
                     }
                     else
                     {
-                        all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF);
+                        all_temps[i].diff |= (1 << DROP_OUT_OFF);
                         not_in_global_set++;
                     }
                 }
@@ -3910,14 +3899,14 @@ void *manual_trigger_scan(void *arg)
                 for (int i = 0; i < old_num_op; i++)
 #endif
                 {
-                    if (all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF))
+                    if (all_temps[i].diff & (1 << DROP_OUT_OFF))
                     {
                         continue;
                     }
                     if (sigsetjmp(jump_buffer, 1) == 0)
                     {
-                        all_temps[i].diffs[1] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-                        if (all_temps[i].diffs[1] != 0)
+                        uint8_t changes = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+                        if (changes != 0)
                         {
                             // foundInner = (uintptr_t)all_temps[i].op;
                             // if (foundInner > prev_changed_max)
@@ -3929,13 +3918,13 @@ void *manual_trigger_scan(void *arg)
                             //     prev_changed_min = foundInner;
                             // }
                             // populate_hotness_runtime(fast_scan_idx);
-                            if (all_temps[i].diffs[fast_scan_idx] == 127)
+                            if (changes == 127)
                             {
-                                all_temps[i].diffs[NUM_SLOTS - 1] += 1;
+                                all_temps[i].diff += 1;
                             }
                             else
                             {
-                                all_temps[i].diffs[NUM_SLOTS - 1] += 2;
+                                all_temps[i].diff += 2;
                             }
                             cur_fast_num_hot++;
                         }
@@ -3943,11 +3932,11 @@ void *manual_trigger_scan(void *arg)
                         {
                             zero_hot_num++;
                         }
-                        all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                        all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
                     }
                     else
                     {
-                        all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF);
+                        all_temps[i].diff |= (1 << DROP_OUT_OFF);
                         not_in_global_set++;
                     }
                 }
@@ -3974,22 +3963,22 @@ void *manual_trigger_scan(void *arg)
                     // foundInner = (uintptr_t)all_temps[i].op;
                     // if (foundInner > prev_changed_min && foundInner < prev_changed_max)
                     {
-                        if (all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF))
+                        if (all_temps[i].diff & (1 << DROP_OUT_OFF))
                         {
                             continue;
                         }
                         if (sigsetjmp(jump_buffer, 1) == 0)
                         {
-                            all_temps[i].diffs[2] = (abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(all_temps[i].op->hotness - all_temps[i].prev_refcnt);
-                            if (all_temps[i].diffs[2] != 0)
+                            uint8_t changes = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+                            if (changes != 0)
                             {
-                                if (all_temps[i].diffs[fast_scan_idx] == 127)
+                                if (changes == 127)
                                 {
-                                    all_temps[i].diffs[NUM_SLOTS - 1] += 1;
+                                    all_temps[i].diff += 1;
                                 }
                                 else
                                 {
-                                    all_temps[i].diffs[NUM_SLOTS - 1] += 2;
+                                    all_temps[i].diff += 2;
                                 }
                                 cur_fast_num_hot++;
                             }
@@ -3997,17 +3986,17 @@ void *manual_trigger_scan(void *arg)
                             {
                                 zero_hot_num++;
                             }
-                            all_temps[i].prev_refcnt = all_temps[i].op->hotness;
+                            all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
                         }
                         else
                         {
-                            all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF); // not in the set, drop out
+                            all_temps[i].diff |= (1 << DROP_OUT_OFF); // not in the set, drop out
                             not_in_global_set++;
                         }
                     }
                     // else
                     // {
-                    //     all_temps[i].diffs[NUM_SLOTS - 1] |= (1 << DROP_OUT_OFF); // falls outside chaning range, also drop out
+                    //     all_temps[i].diff |= (1 << DROP_OUT_OFF); // falls outside chaning range, also drop out
                     // }
                 }
             }
@@ -4071,12 +4060,6 @@ void *manual_trigger_scan(void *arg)
         if (++fast_scan_idx >= NUM_SLOTS - 1)
         {
             fast_scan_idx = -1; // roll back to slow scan
-            // force promotion
-            // if (old_num_op > 1000000 && cur_hot_in_all < 0.1)
-            // {
-            //     fprintf(stderr, "Attention! Enable forced promotion...\n");
-            //     forced_promo = true;
-            // }
 
             // determine if we want to skip future slow trace
             // clock_gettime(CLOCK_MONOTONIC, &global_current);
@@ -4088,7 +4071,7 @@ void *manual_trigger_scan(void *arg)
             //     skip_future_slow = true;
             // }
 
-            // cur_mig_time = try_trigger_migration_revised(0, partition * 7); // do migration
+            cur_mig_time = try_trigger_migration_revised(0, partition * 7); // do migration
             total_migration_time += cur_mig_time;
             fprintf(stderr, "total_migration_time: %.3f\n", total_migration_time);
             max_num_hot = 0;
@@ -4100,29 +4083,20 @@ void *manual_trigger_scan(void *arg)
                 clock_gettime(CLOCK_MONOTONIC, &ts);
                 for (int i = 0; i < old_num_op; i++)
                 {
-                    bool print_obj = false;
-                    // for (int j = 0; j < NUM_SLOTS - 1; j++)
-                    // {
-                    //     short cur_his = all_temps[i].diffs[j];
-                    //     if (cur_his != 0)
-                    //     {
-                    //         print_obj = true;
-                    //         break;
-                    //     }
-                    // }
-                    if ((all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK) && !(all_temps[i].diffs[NUM_SLOTS - 1] & (1 << DROP_OUT_OFF)))
-                        print_obj = true;
+                    // bool print_obj = false;
+                    // if ((all_temps[i].diff & HOTNESS_MASK) && !(all_temps[i].diff & (1 << DROP_OUT_OFF)))
+                    //     print_obj = true;
                     uintptr_t found_inner = (uintptr_t)all_temps[i].op;
                     // if (check_in_global_helper(found_inner))
                     // if (print_obj)
                     {
                         fprintf(global_bookkeep_args->fd, "%ld.%ld\t%ld", ts.tv_sec, ts.tv_nsec, found_inner);
                         // fprintf(global_bookkeep_args->fd, "\t%s", Py_TYPE(found_inner)->tp_name);
-                        for (int j = 0; j < NUM_SLOTS - 1; j++)
-                        {
-                            fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
-                        }
-                        fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK);
+                        // for (int j = 0; j < NUM_SLOTS - 1; j++)
+                        // {
+                        //     fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diffs[j]);
+                        // }
+                        fprintf(global_bookkeep_args->fd, "\t%hd", all_temps[i].diff & HOTNESS_MASK);
                         // PyObject_Print(all_temps[i].op, global_bookkeep_args->fd, 0);
                         fprintf(global_bookkeep_args->fd, "\n");
                     }

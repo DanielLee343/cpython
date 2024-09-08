@@ -18,13 +18,15 @@
 
 PyObject _PyInstrumentation_DISABLE =
 {
-    .ob_refcnt = _Py_IMMORTAL_REFCNT,
+    // .ob_refcnt = _Py_IMMORTAL_REFCNT,
+    .ob_refcnt_split[PY_BIG_ENDIAN] = _Py_IMMORTAL_REFCNT,
     .ob_type = &PyBaseObject_Type
 };
 
 PyObject _PyInstrumentation_MISSING =
 {
-    .ob_refcnt = _Py_IMMORTAL_REFCNT,
+    // .ob_refcnt = _Py_IMMORTAL_REFCNT,
+    .ob_refcnt_split[PY_BIG_ENDIAN] = _Py_IMMORTAL_REFCNT,
     .ob_type = &PyBaseObject_Type
 };
 

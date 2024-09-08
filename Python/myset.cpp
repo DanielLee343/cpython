@@ -77,7 +77,7 @@ extern "C" void reset_all_temps_func()
     for (auto it = global_unordered_set.begin(); it != global_unordered_set.end(); ++it)
     {
         all_temps[i].op = (PyObject *)*it;
-        all_temps[i].prev_refcnt = 0;
+        // all_temps[i].prev_refcnt = 0;
         i++;
     }
     old_num_op = new_num_op;
@@ -109,24 +109,6 @@ extern "C" unsigned int get_map_size()
     return global_unordered_map.size();
 }
 
-extern "C" void reset_all_temps_map()
-{
-    free(all_temps);
-    unsigned int new_num_op = global_unordered_map.size();
-    all_temps = (OBJ_TEMP *)calloc(new_num_op, sizeof(OBJ_TEMP));
-    unsigned int i = 0;
-    for (auto it = global_unordered_map.begin(); it != global_unordered_map.end(); ++it)
-    {
-        all_temps[i].op = (PyObject *)(it->first);
-        all_temps[i].prev_refcnt = 0;
-        if (it->second)
-            all_temps[i].diffs[7] |= (1 << 7);
-        else
-            all_temps[i].diffs[7] &= ~(1 << 7);
-        i++;
-    }
-    old_num_op = new_num_op;
-}
 // pages_loc_hotness
 // map_pair
 extern "C" void insert_into_pages(uintptr_t page_addr, short hotness, bool location)
@@ -152,19 +134,6 @@ extern "C" void insert_into_pages_only_exists(uintptr_t page_addr, short hotness
         it->second.first += hotness;
     }
 }
-
-// extern "C" void set_location_pages(void *page, bool location)
-// {
-//     if (location)
-//         pages_loc_hotness[page] |= (1 << 14); // set to 1 --> CXL
-//     else
-//         pages_loc_hotness[page] &= ~(1 << 14); // set to 0 --> DRAM
-// }
-
-// extern "C" bool get_location_pages(void *page)
-// {
-//     return pages_loc_hotness[page] & (1 << 14);
-// }
 
 extern "C" int check_in_pages(uintptr_t page)
 {
@@ -215,14 +184,14 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         // int processed = process_signed_value(it->second);
-        if (it->second.first < split && !it->second.second)
+        if (it->second.first < split && !it->second.second) // is cold and is in DRAM
         {
             *demote_pages = (void *)it->first; // Store the pointer at the memory location
             demote_pages++;                    // Move the pointer to the next memory location
             (*demo_size)++;                    // Increment the value stored at the memory location
             // it->second.second = 1;
         }
-        else if (it->second.first >= split && it->second.second)
+        else if (it->second.first >= split && it->second.second) // is hot and is in CXL
         {
             *promote_pages = (void *)it->first; // Store the pointer at the memory location
             promote_pages++;                    // Move the pointer to the next memory location
@@ -237,20 +206,20 @@ extern "C" void populate_mig_pages_wo_checking(void **demote_pages, void **promo
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         // int processed = process_signed_value(it->second);
-        if (it->second.first < split) // Most sig bit: 1(negative) cold dominant && in DRAM
+        if (it->second.first < split)
         {
-            *demote_pages = (void *)it->first; // Store the pointer at the memory location
-            demote_pages++;                    // Move the pointer to the next memory location
-            (*demo_size)++;                    // Increment the value stored at the memory location
-            // it->second |= (1 << 30);   // mark in CXL
+            *demote_pages = (void *)it->first;
+            demote_pages++;
+            (*demo_size)++;
+            // it->second |= (1 << 30);
             // it->second.second = 1;
         }
-        else if (it->second.first >= split) // Most sig bit: 0(positive) hot dominant && in CXL
+        else if (it->second.first >= split)
         {
-            *promote_pages = (void *)it->first; // Store the pointer at the memory location
-            promote_pages++;                    // Move the pointer to the next memory location
-            (*promo_size)++;                    // Increment the value stored at the memory location
-            // it->second &= ~(1 << 30);   // mark in DRAM
+            *promote_pages = (void *)it->first;
+            promote_pages++;
+            (*promo_size)++;
+            // it->second &= ~(1 << 30);
             // it->second.second = 0;
         }
     }
@@ -294,6 +263,15 @@ extern "C" void reset_pages_hotness()
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         it->second.first = 0;
+    }
+}
+
+extern "C" void page_temp_cooling(float cooling_weight)
+{
+    fprintf(stderr, "resetting pages hotness\n");
+    for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
+    {
+        it->second.first *= cooling_weight;
     }
 }
 

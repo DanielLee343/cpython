@@ -14823,7 +14823,8 @@ _PyUnicode_ClearInterned(PyInterpreterState *interp)
             // Skip the Immortal Instance check and restore
             // the two references (key and value) ignored
             // by PyUnicode_InternInPlace().
-            s->ob_refcnt = 2;
+            // s->ob_refcnt = 2;
+            s->ob_refcnt_split[PY_BIG_ENDIAN] = 2;
 #ifdef INTERNED_STATS
             total_length += PyUnicode_GET_LENGTH(s);
 #endif

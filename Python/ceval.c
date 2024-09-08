@@ -53,6 +53,7 @@
 // preprocessor.
 
 #undef Py_DECREF
+// if (--op->ob_refcnt == 0) { 
 #define Py_DECREF(arg) \
     do { \
         PyObject *op = _PyObject_CAST(arg); \
@@ -60,7 +61,7 @@
             break; \
         } \
         _Py_DECREF_STAT_INC(); \
-        if (--op->ob_refcnt == 0) { \
+        if (--op->ob_refcnt_split[PY_BIG_ENDIAN] == 0) { \
             destructor dealloc = Py_TYPE(op)->tp_dealloc; \
             (*dealloc)(op); \
         } \
@@ -80,6 +81,7 @@
     (_PyObject_CAST(ob)->ob_type == (type))
 
 #undef _Py_DECREF_SPECIALIZED
+// if (--op->ob_refcnt == 0) {
 #define _Py_DECREF_SPECIALIZED(arg, dealloc) \
     do { \
         PyObject *op = _PyObject_CAST(arg); \
@@ -87,7 +89,7 @@
             break; \
         } \
         _Py_DECREF_STAT_INC(); \
-        if (--op->ob_refcnt == 0) { \
+        if (--op->ob_refcnt_split[PY_BIG_ENDIAN] == 0) { \
             destructor d = (destructor)(dealloc); \
             d(op); \
         } \
