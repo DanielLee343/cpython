@@ -45,6 +45,12 @@ extern "C"
     void page_temp_cooling(float cooling_weight);
     void set_location_pages(uintptr_t page, bool location);
 
+    void populate_hotness_vec();
+    short get_avg_hotness();
+    short get_median_hotness();
+    short get_mode_hotness();
+    void clear_hotness_vec();
+
 #ifdef __cplusplus
 }
 #endif

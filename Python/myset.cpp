@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <vector>
+#include <numeric> // For std::accumulate
+#include <algorithm>
+#include <map>
 #include <Python.h>
 // #include <numa.h>
 // #include <numaif.h>
@@ -15,6 +19,7 @@ static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
 static std::unordered_map<void *, int> pages_loc_hotness;
 static std::unordered_map<uintptr_t, std::pair<short, bool>> map_pair;
+static std::vector<short> hotness_vec;
 extern OBJ_TEMP *all_temps;
 extern unsigned int old_num_op;
 
@@ -184,14 +189,14 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
         // int processed = process_signed_value(it->second);
-        if (it->second.first < split && !it->second.second) // is cold and is in DRAM
+        if (it->second.first <= split && !it->second.second) // is cold and is in DRAM
         {
             *demote_pages = (void *)it->first; // Store the pointer at the memory location
             demote_pages++;                    // Move the pointer to the next memory location
             (*demo_size)++;                    // Increment the value stored at the memory location
             // it->second.second = 1;
         }
-        else if (it->second.first >= split && it->second.second) // is hot and is in CXL
+        else if (it->second.first > split && it->second.second) // is hot and is in CXL
         {
             *promote_pages = (void *)it->first; // Store the pointer at the memory location
             promote_pages++;                    // Move the pointer to the next memory location
@@ -284,7 +289,63 @@ extern "C" void set_location_pages(uintptr_t page, bool location)
             it->second.second = 1;
         else
             it->second.second = 0;
-        // clear hotness
-        it->second.first = 0;
+        // // clear hotness
+        // it->second.first = 0;
     }
+}
+
+extern "C" void populate_hotness_vec()
+{
+    for (const auto &entry : map_pair)
+    {
+        hotness_vec.push_back(entry.second.first);
+    }
+}
+
+extern "C" short get_avg_hotness()
+{
+    double average = static_cast<double>(std::accumulate(hotness_vec.begin(), hotness_vec.end(), 0)) / hotness_vec.size();
+    return (short)average;
+}
+
+extern "C" short get_median_hotness()
+{
+    std::sort(hotness_vec.begin(), hotness_vec.end());
+    double median = 0;
+    size_t n = hotness_vec.size();
+    if (n % 2 == 0)
+    {
+        median = (hotness_vec[n / 2 - 1] + hotness_vec[n / 2]) / 2.0;
+    }
+    else
+    {
+        median = hotness_vec[n / 2];
+    }
+    return (short)median;
+}
+
+extern "C" short get_mode_hotness()
+{
+    std::map<short, int> frequency_map;
+    for (const short value : hotness_vec)
+    {
+        frequency_map[value]++;
+    }
+
+    short mode = hotness_vec[0];
+    int max_count = 0;
+    for (const auto &pair : frequency_map)
+    {
+        if (pair.second > max_count)
+        {
+            max_count = pair.second;
+            mode = pair.first;
+        }
+    }
+    return mode;
+}
+
+extern "C" void clear_hotness_vec()
+{
+    hotness_vec.clear();
 }
