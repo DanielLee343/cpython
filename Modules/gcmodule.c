@@ -83,7 +83,7 @@ size_t very_large_num_op = 41000000; // roughly 630 MB
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
-#define SYS_RESERVE 96
+#define SYS_RESERVE 667
 // #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
@@ -3616,6 +3616,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     cur_dram_free -= SYS_RESERVE; // adjust size
     if (cur_dram_free <= 0)
         cur_dram_free = 0;
+    fprintf(stderr, "cur_dram_free: %d\n", cur_dram_free);
 
     double look_page_location_time = align_obj_2_page_bd_revised(start_idx, end_idx); // update page temperature inside
     cur_migration_time += look_page_location_time;
@@ -3655,7 +3656,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         elapsed = end.tv_sec - start.tv_sec;
         elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
         fprintf(stderr, "get mode time: %.3f, mode: %hd\n", elapsed, mode);
-        split = median; // avg, median, mode
+        split = avg; // avg, median, mode
     }
 
     unsigned int max_size = get_pages_size();
@@ -3684,6 +3685,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             demo_size = promo_size;
         // if first time, demote anyway
         if (1) // enable for force_demotion
+        // if (very_first_demote)
         {
             // last_demote_pages = kh_init(ptrset_dup);
             // for (int i = 0; i < demo_size; i++)
@@ -3746,7 +3748,6 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
                 demote_pages = NULL;
             }
         }
-        // }
     }
     else
     {

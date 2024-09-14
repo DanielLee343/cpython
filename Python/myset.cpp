@@ -18,8 +18,10 @@ std::mutex global_set_mutex;
 static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
 static std::unordered_map<void *, int> pages_loc_hotness;
-static std::unordered_map<uintptr_t, std::pair<short, bool>> map_pair;
+// static std::unordered_map<uintptr_t, std::pair<short, bool>> map_pair;
+static std::unordered_map<uintptr_t, std::pair<short, std::pair<bool, bool>>> map_pair;
 static std::vector<short> hotness_vec;
+static bool first_demo = true;
 extern OBJ_TEMP *all_temps;
 extern unsigned int old_num_op;
 
@@ -128,7 +130,8 @@ extern "C" void insert_into_pages(uintptr_t page_addr, short hotness, bool locat
     {
         // map_pair.emplace(page_addr, std::make_pair(is_hot ? hotness : 0, false));
         // map_pair[page_addr] = std::make_pair(is_hot ? hotness : 0, false);
-        map_pair[page_addr] = std::make_pair(hotness, location); // false (0): DRAM, true (1): CXL
+        // map_pair[page_addr] = std::make_pair(hotness, location);                        // false (0): DRAM, true (1): CXL
+        map_pair[page_addr] = std::make_pair(hotness, std::make_pair(location, false)); // false (0): DRAM, true (1): CXL
     }
 }
 extern "C" void insert_into_pages_only_exists(uintptr_t page_addr, short hotness)
@@ -186,22 +189,56 @@ bool getSecondMSB(int num)
 
 extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split)
 {
-    for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
+    if (first_demo)
     {
-        // int processed = process_signed_value(it->second);
-        if (it->second.first <= split && !it->second.second) // is cold and is in DRAM
+        for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
         {
-            *demote_pages = (void *)it->first; // Store the pointer at the memory location
-            demote_pages++;                    // Move the pointer to the next memory location
-            (*demo_size)++;                    // Increment the value stored at the memory location
-            // it->second.second = 1;
+            if (it->second.first <= split && !it->second.second.first) // is cold and is in DRAM
+            {
+                *demote_pages = (void *)it->first; // Store the pointer at the memory location
+                demote_pages++;                    // Move the pointer to the next memory location
+                (*demo_size)++;                    // Increment the value stored at the memory location
+                // it->second.second.second = false;  // clear hit, no need
+            }
+            else if (it->second.first > split && it->second.second.first) // is hot and is in CXL
+            {
+                *promote_pages = (void *)it->first; // Store the pointer at the memory location
+                promote_pages++;                    // Move the pointer to the next memory location
+                (*promo_size)++;                    // Increment the value stored at the memory location
+                // it->second.second.second = false;
+            }
         }
-        else if (it->second.first > split && it->second.second) // is hot and is in CXL
+        first_demo = false;
+    }
+    else
+    {
+        for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
         {
-            *promote_pages = (void *)it->first; // Store the pointer at the memory location
-            promote_pages++;                    // Move the pointer to the next memory location
-            (*promo_size)++;                    // Increment the value stored at the memory location
-            // it->second.second = 0;
+            // if (it->second.first <= split && !it->second.second) // is cold and is in DRAM
+            if (it->second.first <= 1 && !it->second.second.first) // is cold and is in DRAM
+            {
+                if (it->second.second.second) // if hit again
+                {
+                    *demote_pages = (void *)it->first; // Store the pointer at the memory location
+                    demote_pages++;                    // Move the pointer to the next memory location
+                    (*demo_size)++;                    // Increment the value stored at the memory location
+                    it->second.second.second = false;  // clear hit
+                }
+                else
+                {
+                    it->second.second.second = true; // mark as hit again
+                }
+                // it->second.second = 1;
+            }
+            // else if (it->second.first > split && it->second.second) // is hot and is in CXL
+            else if (it->second.first > split && it->second.second.first) // is hot and is in CXL
+            {
+                *promote_pages = (void *)it->first; // Store the pointer at the memory location
+                promote_pages++;                    // Move the pointer to the next memory location
+                (*promo_size)++;                    // Increment the value stored at the memory location
+                it->second.second.second = false;
+                // it->second.second = 0;
+            }
         }
     }
 }
@@ -286,9 +323,9 @@ extern "C" void set_location_pages(uintptr_t page, bool location)
     if (it != map_pair.end())
     {
         if (location)
-            it->second.second = 1;
+            it->second.second.first = 1;
         else
-            it->second.second = 0;
+            it->second.second.first = 0;
         // // clear hotness
         // it->second.first = 0;
     }
