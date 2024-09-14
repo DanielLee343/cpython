@@ -215,7 +215,7 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
         for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
         {
             // if (it->second.first <= split && !it->second.second) // is cold and is in DRAM
-            if (it->second.first <= 1 && !it->second.second.first) // is cold and is in DRAM
+            if (it->second.first <= split && !it->second.second.first) // is cold and is in DRAM
             {
                 if (it->second.second.second) // if hit again
                 {
@@ -313,7 +313,7 @@ extern "C" void page_temp_cooling(float cooling_weight)
     fprintf(stderr, "resetting pages hotness\n");
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
-        it->second.first *= cooling_weight;
+        it->second.first *= (1 - cooling_weight);
     }
 }
 

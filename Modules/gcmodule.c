@@ -97,6 +97,8 @@ unsigned int old_num_op = 0;
 unsigned int prev_num_op = 0;
 unsigned int max_depth = 0;
 unsigned int max_length = 0;
+unsigned long global_demo_size = 0;
+unsigned long global_promo_size = 0;
 
 typedef struct GEN_ID_BOUND
 {
@@ -3625,9 +3627,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // short min_hotness, max_hotness;
     // get_page_hotness_bound(&min_hotness, &max_hotness);
 
-    short split = 1; // < split: cold, >= split, hot
+    short split = 0; // <= split: cold, > split, hot
     // get distribution of hotness, then test different split
-    if (1)
+    if (0)
     {
         clock_gettime(CLOCK_MONOTONIC, &start);
         populate_hotness_vec();
@@ -3803,6 +3805,8 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         promote_pages = NULL;
         promo_size = 0;
     }
+    global_demo_size += demo_size;
+    global_promo_size += promo_size;
     fprintf(stderr, "pages size: %d, split: %hd, demo_size: %d, promo_size: %d\n", max_size, split, demo_size, promo_size);
 
     // prev_c_w_percent = cur_c_w_percent; // remember to update prev_c_w_percent for next try_migration
@@ -4207,6 +4211,7 @@ void *manual_trigger_scan(void *arg)
     terminate_flag_refchain = 0;
     enable_bk = 0;
     fprintf(stderr, "Summary: total_slow_num: %d, total_slow_time: %.3f, total_migration_time: %.3f, num_gc_cycles: %ld, total_new_op_num: %ld\n", total_num_slow, total_slow_time, total_migration_time, num_gc_cycles, total_new_op_num);
+    fprintf(stderr, "global_demo_size: %lu, global_promo_size: %lu\n", global_demo_size, global_promo_size);
     // free(all_temps);
     kh_destroy(ptrset_dup, last_demote_pages);
     // free_map();
