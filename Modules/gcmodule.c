@@ -271,7 +271,6 @@ PyStatus
 _PyGC_Init(PyInterpreterState *interp)
 {
     fprintf(stderr, "PyGC_init called\n");
-    pre_alloc_all_temps();
     last_live_trace_time = clock();
     enable_bk = 0;
     // get_live_time_thresh = INT_MAX;  // don't trigger slow scan by default
@@ -2844,11 +2843,6 @@ void _PyGC_Fini(PyInterpreterState *interp)
     GCState *gcstate = &interp->gc;
     Py_CLEAR(gcstate->garbage);
     Py_CLEAR(gcstate->callbacks);
-    if (all_temps)
-    {
-        numa_free(all_temps, very_large_num_op * sizeof(OBJ_TEMP));
-        all_temps = NULL;
-    }
 
     /* We expect that none of this interpreters objects are shared
     with other interpreters.
@@ -3901,6 +3895,7 @@ void *manual_trigger_scan(void *arg)
     double total_migration_time = 0;
     double total_fast_time = 0.0;
     int total_fast_num = 0;
+    pre_alloc_all_temps();
 
     struct timespec start_fast, end_fast;
     clock_gettime(CLOCK_MONOTONIC, &global_start);
@@ -4217,5 +4212,10 @@ void *manual_trigger_scan(void *arg)
     // free_map();
     free_global();
     free_pages();
+    if (all_temps)
+    {
+        numa_free(all_temps, very_large_num_op * sizeof(OBJ_TEMP));
+        all_temps = NULL;
+    }
     // destroy_global_set_helper();
 }
