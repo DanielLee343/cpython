@@ -55,7 +55,8 @@ kvec_t(PyObject *) local_ptr_vec;
 BookkeepArgs *global_bookkeep_args;
 uintptr_t glb_lowest_op = UINTPTR_MAX;
 struct timespec global_start, global_current;
-
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 static clock_t last_live_trace_time;
 static clock_t last_migrate_time;
 extern int enable_bk;
@@ -270,7 +271,20 @@ void _PyGC_InitState(GCState *gcstate)
 PyStatus
 _PyGC_Init(PyInterpreterState *interp)
 {
+#ifdef DO_MIGRATIOIN
+    fprintf(stderr, "DO_MIGRATIOIN is %s\n", TOSTRING(DO_MIGRATIOIN));
+#endif
+
+#ifdef DEMO_MODE
+    fprintf(stderr, "DEMO_MODE is %s\n", TOSTRING(DEMO_MODE));
+#endif
+
+#ifdef HOTNESS_THRESH
+    fprintf(stderr, "HOTNESS_THRESH is %s\n", TOSTRING(HOTNESS_THRESH));
+#endif
     fprintf(stderr, "PyGC_init called\n");
+
+    pre_alloc_all_temps();
     last_live_trace_time = clock();
     enable_bk = 0;
     // get_live_time_thresh = INT_MAX;  // don't trigger slow scan by default
@@ -2843,6 +2857,11 @@ void _PyGC_Fini(PyInterpreterState *interp)
     GCState *gcstate = &interp->gc;
     Py_CLEAR(gcstate->garbage);
     Py_CLEAR(gcstate->callbacks);
+    if (all_temps)
+    {
+        numa_free(all_temps, very_large_num_op * sizeof(OBJ_TEMP));
+        all_temps = NULL;
+    }
 
     /* We expect that none of this interpreters objects are shared
     with other interpreters.
@@ -3622,38 +3641,38 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // get_page_hotness_bound(&min_hotness, &max_hotness);
 
     short split = 0; // <= split: cold, > split, hot
-    // get distribution of hotness, then test different split
-    if (0)
-    {
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        populate_hotness_vec();
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        elapsed = end.tv_sec - start.tv_sec;
-        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-        fprintf(stderr, "populate hotness vec time: %.3f\n", elapsed);
-
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        short avg = get_avg_hotness();
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        elapsed = end.tv_sec - start.tv_sec;
-        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-        fprintf(stderr, "get avg time: %.3f, avg: %hd\n", elapsed, avg);
-
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        short median = get_median_hotness();
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        elapsed = end.tv_sec - start.tv_sec;
-        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-        fprintf(stderr, "get median time: %.3f, median: %hd\n", elapsed, median);
-
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        short mode = get_mode_hotness();
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        elapsed = end.tv_sec - start.tv_sec;
-        elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-        fprintf(stderr, "get mode time: %.3f, mode: %hd\n", elapsed, mode);
-        split = avg; // avg, median, mode
-    }
+// get distribution of hotness, then test different split
+#if HOTNESS_THRESH == 0
+    split = 0;
+#elif HOTNESS_THRESH == 1 // using average
+    populate_hotness_vec();
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    short avg = get_avg_hotness();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    elapsed = end.tv_sec - start.tv_sec;
+    elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+    fprintf(stderr, "get avg time: %.3f, avg: %hd\n", elapsed, avg);
+    split = avg;
+#elif HOTNESS_THRESH == 2 // using median
+    populate_hotness_vec();
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    short median = get_median_hotness();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    elapsed = end.tv_sec - start.tv_sec;
+    elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+    fprintf(stderr, "get median time: %.3f, median: %hd\n", elapsed, median);
+    split = median;
+#elif HOTNESS_THRESH == 3 // using mode
+    // populate_hotness_vec();
+    get_2nd_mode_hotness();
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    short mode = get_mode_hotness();
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    elapsed = end.tv_sec - start.tv_sec;
+    elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+    fprintf(stderr, "get mode time: %.3f, mode: %hd\n", elapsed, mode);
+    split = mode;
+#endif
 
     unsigned int max_size = get_pages_size();
     int demo_size = 0, promo_size = 0;
@@ -3679,15 +3698,19 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         fprintf(stderr, "entering demotion\n");
         if (promo_size < demo_size)
             demo_size = promo_size;
-        // if first time, demote anyway
+#if (DEMO_MODE == 0) || (DEMO_MODE == 2)
         if (1) // enable for force_demotion
-        // if (very_first_demote)
+#elif DEMO_MODE == 1
+        if (very_first_demote)
+#endif
         {
-            // last_demote_pages = kh_init(ptrset_dup);
-            // for (int i = 0; i < demo_size; i++)
-            // {
-            //     kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
-            // }
+#if DEMO_MODE == 1
+            last_demote_pages = kh_init(ptrset_dup);
+            for (int i = 0; i < demo_size; i++)
+            {
+                kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
+            }
+#endif
             if (demo_size < max_size)
             {
                 demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
@@ -3849,6 +3872,7 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
+
 #ifdef PARTIAL_SCAN
     fprintf(stderr, "partial_scan defined\n");
 #else
@@ -3895,7 +3919,6 @@ void *manual_trigger_scan(void *arg)
     double total_migration_time = 0;
     double total_fast_time = 0.0;
     int total_fast_num = 0;
-    pre_alloc_all_temps();
 
     struct timespec start_fast, end_fast;
     clock_gettime(CLOCK_MONOTONIC, &global_start);
@@ -4158,7 +4181,9 @@ void *manual_trigger_scan(void *arg)
             //     skip_future_slow = true;
             // }
 
+#if DO_MIGRATIOIN == 1
             cur_mig_time = try_trigger_migration_revised(0, partition * 7); // do migration
+#endif
             total_migration_time += cur_mig_time;
             fprintf(stderr, "total_migration_time: %.3f\n", total_migration_time);
             max_num_hot = 0;
@@ -4212,10 +4237,5 @@ void *manual_trigger_scan(void *arg)
     // free_map();
     free_global();
     free_pages();
-    if (all_temps)
-    {
-        numa_free(all_temps, very_large_num_op * sizeof(OBJ_TEMP));
-        all_temps = NULL;
-    }
     // destroy_global_set_helper();
 }

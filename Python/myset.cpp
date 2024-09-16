@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <map>
 #include <Python.h>
+#include <limits>
 // #include <numa.h>
 // #include <numaif.h>
 // numa_set_preferred(0);
@@ -189,7 +190,11 @@ bool getSecondMSB(int num)
 
 extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split)
 {
+#if (DEMO_MODE == 0) || (DEMO_MODE == 1)
+    if (1)
+#elif DEMO_MODE 2
     if (first_demo)
+#endif
     {
         for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
         {
@@ -380,6 +385,54 @@ extern "C" short get_mode_hotness()
         }
     }
     return mode;
+}
+
+extern "C" short get_2nd_mode_hotness()
+{
+    if (hotness_vec.empty())
+        return std::numeric_limits<short>::min(); // Return some error value if empty
+
+    std::map<short, int> frequency_map;
+
+    // Populate the frequency map
+    for (const short value : hotness_vec)
+    {
+        frequency_map[value]++;
+    }
+
+    short first_mode = hotness_vec[0];
+    short second_mode = first_mode; // Initialize second mode to a valid value
+    int first_max_count = 0;
+    int second_max_count = 0;
+
+    // Find both first and second modes
+    for (const auto &pair : frequency_map)
+    {
+        if (pair.second > first_max_count)
+        {
+            // Shift current first mode to second mode
+            second_max_count = first_max_count;
+            second_mode = first_mode;
+
+            // Update first mode
+            first_max_count = pair.second;
+            first_mode = pair.first;
+        }
+        else if (pair.second > second_max_count && pair.first != first_mode)
+        {
+            // Update second mode only if it is not the first mode
+            second_max_count = pair.second;
+            second_mode = pair.first;
+        }
+    }
+
+    // If the second mode was never updated and all values are the same
+    if (second_max_count == 0)
+    {
+        return std::numeric_limits<short>::min(); // Or handle appropriately
+    }
+
+    return second_mode;
 }
 
 extern "C" void clear_hotness_vec()
