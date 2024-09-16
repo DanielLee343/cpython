@@ -192,7 +192,7 @@ extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, in
 {
 #if (DEMO_MODE == 0) || (DEMO_MODE == 1)
     if (1)
-#elif DEMO_MODE 2
+#elif DEMO_MODE == 2
     if (first_demo)
 #endif
     {

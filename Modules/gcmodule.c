@@ -3663,10 +3663,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     fprintf(stderr, "get median time: %.3f, median: %hd\n", elapsed, median);
     split = median;
 #elif HOTNESS_THRESH == 3 // using mode
-    // populate_hotness_vec();
-    get_2nd_mode_hotness();
+    populate_hotness_vec();
     clock_gettime(CLOCK_MONOTONIC, &start);
-    short mode = get_mode_hotness();
+    short mode = get_2nd_mode_hotness();
     clock_gettime(CLOCK_MONOTONIC, &end);
     elapsed = end.tv_sec - start.tv_sec;
     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;

@@ -49,6 +49,7 @@ extern "C"
     short get_avg_hotness();
     short get_median_hotness();
     short get_mode_hotness();
+    short get_2nd_mode_hotness();
     void clear_hotness_vec();
 
 #ifdef __cplusplus

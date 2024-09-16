@@ -9,6 +9,10 @@ rm -rf python
 # sleep 1
 echo "starting building..."
 # make -j regen-cases
+# assign default values if arguments are not provided
+: "${1:=0}"
+: "${2:=0}"
+: "${3:=0}"
 make -j48 DO_MIGRATIOIN=$1 DEMO_MODE=$2 HOTNESS_THRESH=$3
 # this will only build python interpreter, no shared mod, etc, for faster test
 # make only_intp -j48
