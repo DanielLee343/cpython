@@ -38,7 +38,7 @@ extern "C"
     unsigned int get_pages_size();
     // bool get_location_pages(void *page);
     void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
-    void populate_mig_pages_wo_checking(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
+    void populate_mig_pages_wo_hit_again(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split);
     void get_page_hotness_bound(short *min, short *max);
     void print_all_pages_hotness();
     void reset_pages_hotness();

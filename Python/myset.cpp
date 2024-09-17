@@ -190,84 +190,55 @@ bool getSecondMSB(int num)
 
 extern "C" void populate_mig_pages(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split)
 {
-#if (DEMO_MODE == 0) || (DEMO_MODE == 1)
-    if (1)
-#elif DEMO_MODE == 2
     if (first_demo)
-#endif
     {
-        for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
-        {
-            if (it->second.first <= split && !it->second.second.first) // is cold and is in DRAM
-            {
-                *demote_pages = (void *)it->first; // Store the pointer at the memory location
-                demote_pages++;                    // Move the pointer to the next memory location
-                (*demo_size)++;                    // Increment the value stored at the memory location
-                // it->second.second.second = false;  // clear hit, no need
-            }
-            else if (it->second.first > split && it->second.second.first) // is hot and is in CXL
-            {
-                *promote_pages = (void *)it->first; // Store the pointer at the memory location
-                promote_pages++;                    // Move the pointer to the next memory location
-                (*promo_size)++;                    // Increment the value stored at the memory location
-                // it->second.second.second = false;
-            }
-        }
+        populate_mig_pages_wo_hit_again(demote_pages, promote_pages, demo_size, promo_size, split);
         first_demo = false;
     }
     else
     {
         for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
         {
-            // if (it->second.first <= split && !it->second.second) // is cold and is in DRAM
             if (it->second.first <= split && !it->second.second.first) // is cold and is in DRAM
             {
                 if (it->second.second.second) // if hit again
                 {
-                    *demote_pages = (void *)it->first; // Store the pointer at the memory location
-                    demote_pages++;                    // Move the pointer to the next memory location
-                    (*demo_size)++;                    // Increment the value stored at the memory location
-                    it->second.second.second = false;  // clear hit
+                    *demote_pages = (void *)it->first;
+                    demote_pages++;
+                    (*demo_size)++;
+                    it->second.second.second = false;
                 }
                 else
                 {
-                    it->second.second.second = true; // mark as hit again
+                    it->second.second.second = true;
                 }
-                // it->second.second = 1;
             }
-            // else if (it->second.first > split && it->second.second) // is hot and is in CXL
             else if (it->second.first > split && it->second.second.first) // is hot and is in CXL
             {
-                *promote_pages = (void *)it->first; // Store the pointer at the memory location
-                promote_pages++;                    // Move the pointer to the next memory location
-                (*promo_size)++;                    // Increment the value stored at the memory location
+                *promote_pages = (void *)it->first;
+                promote_pages++;
+                (*promo_size)++;
                 it->second.second.second = false;
-                // it->second.second = 0;
             }
         }
     }
 }
 
-extern "C" void populate_mig_pages_wo_checking(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split)
+extern "C" void populate_mig_pages_wo_hit_again(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, short split)
 {
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
-        // int processed = process_signed_value(it->second);
-        if (it->second.first < split)
+        if (it->second.first <= split && !it->second.second.first) // is cold and is in DRAM
         {
             *demote_pages = (void *)it->first;
             demote_pages++;
             (*demo_size)++;
-            // it->second |= (1 << 30);
-            // it->second.second = 1;
         }
-        else if (it->second.first >= split)
+        else if (it->second.first > split && it->second.second.first) // is hot and is in CXL
         {
             *promote_pages = (void *)it->first;
             promote_pages++;
             (*promo_size)++;
-            // it->second &= ~(1 << 30);
-            // it->second.second = 0;
         }
     }
 }

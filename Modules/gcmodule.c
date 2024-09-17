@@ -61,6 +61,7 @@ static clock_t last_live_trace_time;
 static clock_t last_migrate_time;
 extern int enable_bk;
 bool very_first_demote = true;
+bool forced_demo = false;
 bool very_first_mig = true;
 khash_t(ptrset_dup) * last_demote_pages; // for lazy demotion
 double prev_c_w_percent = 0.0;
@@ -3681,22 +3682,29 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
     // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
 
-    // if (very_first_mig)
-    // {
-    //     populate_mig_pages_wo_checking(demote_pages, promote_pages, &demo_size, &promo_size, split);
-    // }
-    // else
-    {
-        populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
-    }
+#if (DEMO_MODE == 0) || (DEMO_MODE == 1)
+    populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+#elif DEMO_MODE == 2
+    populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+#endif
+
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
     fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
-    if (cur_dram_free < 50 && (promo_size > cur_dram_free * 256) && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
+    if (cur_dram_free < 50 && (promo_size > (cur_dram_free + 50) * 256) && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
     {
+#if DEMO_MODE == 2
+        goto do_demo;
+#endif
         fprintf(stderr, "entering demotion\n");
         if (promo_size < demo_size)
             demo_size = promo_size;
+        else // means we need to do demo anyway regardless lazy or not
+        {
+            // forced_demo = true;
+            fprintf(stderr, "doing forced demo\n");
+            goto do_demo;
+        }
 #if (DEMO_MODE == 0) || (DEMO_MODE == 2)
         if (1) // enable for force_demotion
 #elif DEMO_MODE == 1
@@ -3710,6 +3718,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
                 kh_put(ptrset_dup, last_demote_pages, demote_pages[i], &ret);
             }
 #endif
+        do_demo:
             if (demo_size < max_size)
             {
                 demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
