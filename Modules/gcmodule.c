@@ -85,7 +85,7 @@ size_t very_large_num_op = 41000000; // roughly 630 MB
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
-#define SYS_RESERVE 667
+#define SYS_RESERVE 76
 // #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
@@ -3691,8 +3691,10 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
     fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
-    if (cur_dram_free < 50 && (promo_size > (cur_dram_free + 50) * 256) && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
+    if (cur_dram_free < 50 && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
     {
+        // if(promo_size <= (cur_dram_free + 50) * 256)
+        // continue;
 #if DEMO_MODE == 2
         goto do_demo;
 #endif
