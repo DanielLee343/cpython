@@ -51,6 +51,7 @@ extern "C"
     short get_mode_hotness();
     short get_2nd_mode_hotness();
     void clear_hotness_vec();
+    void dump_page_hotness(FILE *fd);
 
 #ifdef __cplusplus
 }

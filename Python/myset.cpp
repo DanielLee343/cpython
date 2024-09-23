@@ -12,6 +12,8 @@
 #include <map>
 #include <Python.h>
 #include <limits>
+#include <chrono>
+#include <ctime>
 // #include <numa.h>
 // #include <numaif.h>
 // numa_set_preferred(0);
@@ -409,4 +411,21 @@ extern "C" short get_2nd_mode_hotness()
 extern "C" void clear_hotness_vec()
 {
     hotness_vec.clear();
+}
+
+extern "C" void dump_page_hotness(FILE *fd)
+{
+    // auto now = std::chrono::system_clock::now();
+    // std::time_t current_time = std::chrono::system_clock::to_time_t(now);
+    // std::tm *local_time = std::localtime(&current_time);
+    // char cur_time[30];
+    // std::strftime(cur_time, sizeof(cur_time), "%Y-%m-%d %H:%M:%S", local_time);
+    auto now = std::chrono::system_clock::now();
+    auto duration_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    // auto duration_in_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch());
+
+    for (short number : hotness_vec)
+    {
+        fprintf(fd, "%lld %hd\n", duration_in_ms.count(), number);
+    }
 }

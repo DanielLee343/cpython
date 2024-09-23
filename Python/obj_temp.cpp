@@ -12,7 +12,8 @@ extern "C" void cppDefaultSortAsc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diff & 0x7F) > (a.diff & 0x7F); // Sort asc
+                  //   return (b.diff & 0x7F) > (a.diff & 0x7F); // Sort asc
+                  return (b.diffs[NUM_SLOTS - 1] & 0x7F) > (a.diffs[NUM_SLOTS - 1] & 0x7F); // Sort asc
               });
 }
 
@@ -20,7 +21,8 @@ extern "C" void cppDefaultSortDesc(OBJ_TEMP *all_temps, size_t n)
 {
     std::sort(all_temps, all_temps + n, [](const OBJ_TEMP &a, const OBJ_TEMP &b)
               {
-                  return (b.diff & 0x7F) < (a.diff & 0x7F); // Sort desc
+                  //   return (b.diff & 0x7F) < (a.diff & 0x7F); // Sort desc
+                  return (b.diffs[NUM_SLOTS - 1] & 0x7F) < (a.diffs[NUM_SLOTS - 1] & 0x7F); // Sort desc
               });
 }
 

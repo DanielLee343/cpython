@@ -13,7 +13,7 @@ echo "starting building..."
 : "${1:=0}"
 : "${2:=0}"
 : "${3:=0}"
-make -j48 DO_MIGRATIOIN=$1 DEMO_MODE=$2 HOTNESS_THRESH=$3
+make -j48 DO_MIGRATION=$1 DEMO_MODE=$2 HOTNESS_THRESH=$3
 # this will only build python interpreter, no shared mod, etc, for faster test
 # make only_intp -j48
 
