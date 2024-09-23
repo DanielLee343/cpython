@@ -1594,7 +1594,7 @@ void pre_alloc_all_temps()
 {
     // all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
     fprintf(stderr, "pre_allocate all_temps\n");
-    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), CXL_MASK);
+    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), DRAM_MASK);
     if (all_temps == NULL)
     {
         fprintf(stderr, "Failed to allocate memory for all ops\n");
@@ -3625,6 +3625,7 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
         printf("No pages found in node 0 or node 1.\n");
         return 0;
     }
+    pages_in_node_0 -= (very_large_num_op * sizeof(OBJ_TEMP)) / PAGE_SIZE;
     *dram_percent = (int)((pages_in_node_0 * 100.0) / total_pages);
     *cxl_percent = (int)((pages_in_node_1 * 100.0) / total_pages);
 
@@ -3988,6 +3989,7 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
+    global_bookkeep_args = (BookkeepArgs *)arg;
     if (global_bookkeep_args->doIO)
     {
         const char *filename = "/home/lyuze/workspace/py_track/page_hotness.txt";
@@ -4013,7 +4015,6 @@ void *manual_trigger_scan(void *arg)
     fprintf(stderr, "doing whole scan\n");
 #endif
 
-    global_bookkeep_args = (BookkeepArgs *)arg;
     if (numa_available() == -1 || numa_num_configured_nodes() < 2)
     {
         fprintf(stderr, "CXL offloading is not supported!\n");
