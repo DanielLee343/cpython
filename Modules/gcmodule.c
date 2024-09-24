@@ -1674,14 +1674,15 @@ static int try_trigger_slow_scan()
 #else
         page_temp_cooling(0.5);
 #endif
-        fprintf(stderr, "clearing diff in metadata\n");
+        // fprintf(stderr, "clearing diff in metadata\n");
         {
             for (unsigned int i = 0; i < old_num_op; i++)
             {
-                for (int j = 0; j < NUM_SLOTS; j++)
-                {
-                    all_temps[i].diffs[j] = 0;
-                }
+                all_temps[i].diffs[NUM_SLOTS - 1] = 0;
+                // for (int j = 0; j < NUM_SLOTS; j++)
+                // {
+                //     all_temps[i].diffs[j] = 0;
+                // }
                 // all_temps[i].diff = 0; // why need?
             }
         }
@@ -3266,7 +3267,7 @@ int check_in_global_helper(uintptr_t op)
 
 void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
 {
-    fprintf(stderr, "sampling from: %u, to: %u\n", start_idx, end_idx);
+    fprintf(stderr, "scan_idx: %d, sampling from: %u, to: %u\n", scan_idx, start_idx, end_idx);
     // int prev_scan_idx = (scan_idx == 0) ? (NUM_SLOTS - 2) : (scan_idx - 1);
     // fprintf(stderr, "prev_scan_idx: %d, cur scan_idx: %d\n", prev_scan_idx, scan_idx);
     for (int i = start_idx; i < end_idx; i++)
@@ -3629,9 +3630,6 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
     *dram_percent = (int)((pages_in_node_0 * 100.0) / total_pages);
     *cxl_percent = (int)((pages_in_node_1 * 100.0) / total_pages);
 
-    fprintf(stderr, "Pages in node 0: %d (%d%%)\n", pages_in_node_0, *dram_percent);
-    fprintf(stderr, "Pages in node 1: %d (%d%%)\n", pages_in_node_1, *cxl_percent);
-
     return 0;
 }
 
@@ -3762,7 +3760,9 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     {
         int dram_percent = 0, cxl_percent = 0;
         get_rss_ratio(&dram_percent, &cxl_percent);
-        if (dram_percent >= 50)
+        fprintf(stderr, "Pages in node 0: %d%%\n", dram_percent);
+        fprintf(stderr, "Pages in node 1: %d%%\n", cxl_percent);
+        if (dram_percent >= 30) // TODO, change adaptively
             enable_lazy = 0;
         else
             enable_lazy = 1;
