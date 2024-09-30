@@ -37,6 +37,7 @@
 #include <numa.h>
 #include <setjmp.h>
 #include <string.h>
+#include <float.h>
 
 #include "myset.h"
 #include "kh_set_wrap.h"
@@ -85,7 +86,7 @@ size_t very_large_num_op = 41000000; // roughly 630 MB
 #define LOCATION_OFF 7
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
-#define SYS_RESERVE 76
+#define SYS_RESERVE 166
 // #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
@@ -104,6 +105,22 @@ unsigned long global_promo_size = 0;
 int global_do_migration = 0;   // swich for enable migration or not. 0: disable, 1: enable
 int global_demo_mode = 0;      // switch for demotion mode. 0: disable lazy demotion, 1: always lazy (stale impl), 2: always lazy (new impl), 3: adaptive lazy
 int global_hotness_thresh = 0; // switch for hotness threshold. 0: 0, 1: avg, 2: median, 3: mode
+
+// for adaptive lazy demo
+#define buffer_size 8
+const char *perf_stat_file = "workspace/py_track/perf_stat.log";
+const char *bw_file = "workspace/py_track/parsed_bw.txt";
+char *perf_stat_full_path;
+char *bw_full_path;
+double dram_bw_arr[buffer_size];
+double cxl_bw_arr[buffer_size];
+double llc_miss_arr[buffer_size];
+const char *home_dir;
+char llc_line[256];
+char bw_line[128];
+double llc_load_miss_percent = 0.0, avg_llc_miss = 0.0;
+double dram_bw = 0.0, cxl_bw = 0.0, avg_cxl_bw = 0.0;
+int buffer_index = 0;
 
 typedef struct GEN_ID_BOUND
 {
@@ -272,6 +289,28 @@ void _PyGC_InitState(GCState *gcstate)
 #undef INIT_HEAD
 }
 
+void create_full_path()
+{
+    size_t home_len = strlen(home_dir);
+    size_t perf_stat_file_len = strlen(perf_stat_file);
+    size_t bw_file_len = strlen(bw_file);
+
+    perf_stat_full_path = (char *)malloc(home_len + perf_stat_file_len + 2); // +2 for '/' and '\0'
+    bw_full_path = (char *)malloc(home_len + bw_file_len + 2);               // +2 for '/' and '\0'
+
+    if (perf_stat_full_path == NULL || bw_full_path == NULL)
+    {
+        perror("Failed to allocate file path");
+        exit(EXIT_FAILURE);
+    }
+
+    strcpy(perf_stat_full_path, home_dir);
+    strcat(perf_stat_full_path, "/");
+    strcat(perf_stat_full_path, perf_stat_file);
+    strcpy(bw_full_path, home_dir);
+    strcat(bw_full_path, "/");
+    strcat(bw_full_path, bw_file);
+}
 PyStatus
 _PyGC_Init(PyInterpreterState *interp)
 {
@@ -1594,7 +1633,7 @@ void pre_alloc_all_temps()
 {
     // all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
     fprintf(stderr, "pre_allocate all_temps\n");
-    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), DRAM_MASK);
+    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), CXL_MASK);
     if (all_temps == NULL)
     {
         fprintf(stderr, "Failed to allocate memory for all ops\n");
@@ -3633,6 +3672,206 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
     return 0;
 }
 
+void *parse_llc_miss_bw_routine(void *args)
+{
+    while (!terminate_flag_refchain)
+    {
+        FILE *file1 = fopen(perf_stat_full_path, "r");
+        FILE *file2 = fopen(bw_full_path, "r");
+
+        if (file1 == NULL || file2 == NULL)
+        {
+            perror("Unable to open file");
+            sleep(2);
+            continue;
+        }
+        llc_load_miss_percent = 0.0;
+        cxl_bw = 0.0;
+
+        // parse llc miss file
+        while (fgets(llc_line, sizeof(llc_line), file1))
+        {
+            if (strstr(llc_line, "LLC-load-misses") != NULL)
+            {
+                sscanf(llc_line, "%*[^#]# %lf%%", &llc_load_miss_percent);
+                break;
+            }
+        }
+        fclose(file1);
+        if (llc_load_miss_percent == 0.0)
+        {
+            fprintf(stderr, "LLC-load-misses percentage not found.\n");
+        }
+
+        // parse bw file
+        if (fgets(bw_line, sizeof(bw_line), file2) != NULL)
+        {
+            if (sscanf(bw_line, "%lf %lf", &dram_bw, &cxl_bw) == 2)
+            {
+                fprintf(stderr, "dram_bw = %.2lf, cxl_bw = %.2lf\n", dram_bw, cxl_bw);
+            }
+            else
+            {
+                fprintf(stderr, "Failed to parse the line: %s\n", bw_line);
+            }
+        }
+        else
+        {
+            fprintf(stderr, "Error reading the first line of bw file.\n");
+        }
+        fclose(file2);
+
+        if (llc_load_miss_percent < 1e-9 || cxl_bw < 1e-9)
+        {
+            fprintf(stderr, "no data yet, wait till next loop\n");
+            sleep(1);
+            continue;
+        }
+
+        int num_non_zero_llc_miss = 0;
+        int num_non_zero_bw = 0;
+        double total_llc_miss = 0.0;
+        double total_cxl_bw = 0.0;
+        for (int i = 0; i < buffer_size; i++)
+        {
+            if (llc_miss_arr[i] != 0.0)
+            {
+                total_llc_miss += llc_miss_arr[i];
+                num_non_zero_llc_miss++;
+            }
+            if (cxl_bw_arr[i] != 0.0)
+            {
+                total_cxl_bw += cxl_bw_arr[i];
+                num_non_zero_bw++;
+            }
+        }
+        // before new data comes, calculate average
+        avg_llc_miss = (num_non_zero_llc_miss > 0) ? (total_llc_miss / num_non_zero_llc_miss) : 0.0;
+        avg_cxl_bw = (num_non_zero_bw > 0) ? (total_cxl_bw / num_non_zero_bw) : 0.0;
+
+        llc_miss_arr[buffer_index] = llc_load_miss_percent;
+        cxl_bw_arr[buffer_index] = cxl_bw;
+        buffer_index = (buffer_index + 1) % buffer_size;
+        // if(llc_load_miss_percent >> avg_llc_miss) // do something
+
+        // printing
+        for (int i = 0; i < buffer_size; i++)
+        {
+            fprintf(stderr, "%.2lf ", llc_miss_arr[i]);
+        }
+        fprintf(stderr, "\n");
+        for (int i = 0; i < buffer_size; i++)
+        {
+            fprintf(stderr, "%.2lf ", cxl_bw_arr[i]);
+        }
+        fprintf(stderr, "\n");
+        fprintf(stderr, "buffer_index: %d, num_non_zero: %d, avg llc miss: %.2lf, avg cxl bw: %.2lf\n", buffer_index, num_non_zero_llc_miss, avg_llc_miss, avg_cxl_bw);
+        fprintf(stderr, "\n");
+        sleep(1);
+        // struct timespec req;
+        // req.tv_sec = 1;
+        // req.tv_nsec = 200000000L;
+        // nanosleep(&req, NULL);
+    }
+    return NULL;
+}
+
+double calculate_averaged_eagerness(double arr[])
+{
+    // fprintf(stderr, "origin:\n");
+    // for (int i = 0; i < buffer_size; i++)
+    // {
+    //     fprintf(stderr, "%.2lf ", arr[i]);
+    // }
+    // fprintf(stderr, "\n");
+    double total_sum = 0.0;
+    double total_sum_squares = 0.0;
+    double extents[buffer_size];
+
+    // Step 1: Precompute the total sum and sum of squares of all elements
+    for (int i = 0; i < buffer_size; i++)
+    {
+        total_sum += arr[i];
+        total_sum_squares += arr[i] * arr[i];
+    }
+
+    // Step 2: Compute the changing extent for each element and store it
+    double min_extent = DBL_MAX;
+    double max_extent = DBL_MIN;
+
+    for (int i = 0; i < buffer_size; i++)
+    {
+        // Sum and sum of squares excluding arr[i]
+        double sum_others = total_sum - arr[i];
+        double sum_squares_others = total_sum_squares - (arr[i] * arr[i]);
+
+        int count_others = buffer_size - 1;
+
+        // Calculate avg_others and stddev_others
+        double avg_others = sum_others / count_others;
+        double variance_others = (sum_squares_others / count_others) - (avg_others * avg_others);
+        double stddev_others = sqrt(variance_others);
+
+        double changing_extent = 0.0;
+        if (stddev_others > 1e-9)
+        {
+            double numerator = arr[i] - avg_others;
+            if (numerator <= 0)
+                changing_extent = 0;
+            else
+            {
+                changing_extent = numerator / stddev_others;
+            }
+            // fprintf(stderr, "arr[i]: %.2lf, avg_others: %.2lf, numerator: %.2lf, stddev_others: %.2lf\n", arr[i], avg_others, numerator, stddev_others);
+        }
+
+        extents[i] = changing_extent;
+
+        // Update the min and max changing extents
+        if (changing_extent < min_extent)
+        {
+            min_extent = changing_extent;
+        }
+        if (changing_extent > max_extent)
+        {
+            max_extent = changing_extent;
+        }
+    }
+
+    // Step 3: Normalize the changing extents to the range 0 to 1
+    double normalized_extents[buffer_size];
+    if (max_extent > min_extent)
+    {
+        for (int i = 0; i < buffer_size; i++)
+        {
+            normalized_extents[i] = (extents[i] - min_extent) / (max_extent - min_extent);
+        }
+    }
+    else
+    {
+        // If all changing extents are the same, normalize to 0
+        for (int i = 0; i < buffer_size; i++)
+        {
+            normalized_extents[i] = 0;
+        }
+    }
+
+    // Step 4: Calculate the average of the normalized changing extents
+    double normalized_sum = 0.0;
+    for (int i = 0; i < buffer_size; i++)
+    {
+        normalized_sum += normalized_extents[i];
+    }
+
+    // fprintf(stderr, "normailzed:\n");
+    // for (int i = 0; i < buffer_size; i++)
+    // {
+    //     fprintf(stderr, "%.2lf ", normalized_extents[i]);
+    // }
+    // fprintf(stderr, "\n");
+    return normalized_sum / buffer_size;
+}
+
 double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_idx)
 {
     struct timespec start, end;
@@ -3758,18 +3997,44 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     }
     else if (global_demo_mode == 3)
     {
+        // adaptive lazy demo, 1. get RSS distribution
         int dram_percent = 0, cxl_percent = 0;
         get_rss_ratio(&dram_percent, &cxl_percent);
         fprintf(stderr, "Pages in node 0: %d%%\n", dram_percent);
         fprintf(stderr, "Pages in node 1: %d%%\n", cxl_percent);
-        if (dram_percent >= 30) // TODO, change adaptively
-            enable_lazy = 0;
-        else
-            enable_lazy = 1;
+        // 2. get eagerness
+        // llc miss eagerness
+        {
+            double dram_percent_norm = dram_percent / 100.0;
+            fprintf(stderr, "DRAM percent: %.2f\n", dram_percent_norm);
+            double avg_llc_eagerness = calculate_averaged_eagerness(llc_miss_arr);
+            fprintf(stderr, "avg_llc_eagerness: %.2lf\n", avg_llc_eagerness);
+            double avg_cxl_eagerness = calculate_averaged_eagerness(cxl_bw_arr);
+            fprintf(stderr, "avg_cxl_eagerness: %.2lf\n", avg_cxl_eagerness);
+            double total_eagerness = dram_percent_norm * avg_llc_eagerness * avg_cxl_eagerness;
+            fprintf(stderr, "total_eagerness: %.2f\n", total_eagerness);
+            if (total_eagerness >= 0.2)
+                enable_lazy = false;
+            else
+                enable_lazy = true;
+        }
+
+        // if (dram_percent >= 30) // TODO, change adaptively
+        //     enable_lazy = 0;
+        // else
+        //     enable_lazy = 1;
         if (enable_lazy)
+        {
+            fprintf(stderr, "lazy demote\n");
             populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        }
         else
+        {
+            fprintf(stderr, "eager demote\n");
             populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        }
+        // for quick testing
+        // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
     }
 
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
@@ -3803,7 +4068,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             is_migration = true;
             very_first_demote = false;
         }
-        else if (global_demo_mode == 1) // stale demo impl, not best performance
+        else if (global_demo_mode == 1) // stale demo impl, do not use
         {
             if (very_first_demote)
             {
@@ -3959,7 +4224,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
 //  1: trigger scan
 int trigger_bk()
 {
-    // return 1; // dummy switch quick testing
+    return 1; // dummy switch quick testing
     long long total_dram_size;
     long long free_dram_size;
     total_dram_size = numa_node_size(DRAM_MASK, NULL);
@@ -3989,6 +4254,7 @@ int trigger_bk()
 
 void *manual_trigger_scan(void *arg)
 {
+    pthread_t parse_llc_thread_id; // for adaptive lazy demo
     global_bookkeep_args = (BookkeepArgs *)arg;
     if (global_bookkeep_args->doIO)
     {
@@ -4006,6 +4272,20 @@ void *manual_trigger_scan(void *arg)
             {
                 perror("Error deleting the file");
             }
+        }
+    }
+    if (global_demo_mode == 3)
+    {
+        // format llc and bw file paths
+        home_dir = getenv("HOME");
+        create_full_path();
+        fprintf(stderr, "perf_stat_full_path: %s\n", perf_stat_full_path);
+        fprintf(stderr, "bw_full_path: %s\n", bw_full_path);
+        // spawn thread
+        if (pthread_create(&parse_llc_thread_id, NULL, parse_llc_miss_bw_routine, NULL) != 0)
+        {
+            perror("Failed to create thread");
+            return 1;
         }
     }
 
@@ -4332,6 +4612,14 @@ void *manual_trigger_scan(void *arg)
                     // bool print_obj = false;
                     // if ((all_temps[i].diff & HOTNESS_MASK) && !(all_temps[i].diff & (1 << DROP_OUT_OFF)))
                     //     print_obj = true;
+                    int zero_cnt = 0;
+                    for (int j = 0; j < NUM_SLOTS - 1; j++)
+                    {
+                        if (all_temps[i].diffs[j] == 0)
+                            zero_cnt++;
+                    }
+                    if (zero_cnt == 7)
+                        continue;
                     uintptr_t found_inner = (uintptr_t)all_temps[i].op;
                     // if (check_in_global_helper(found_inner))
                     // if (print_obj)
@@ -4360,6 +4648,11 @@ void *manual_trigger_scan(void *arg)
         //     }
         //     else
         usleep(global_bookkeep_args->sample_dur);
+    }
+    if (global_demo_mode == 3)
+    {
+        fprintf(stderr, "joining\n");
+        pthread_join(parse_llc_thread_id, NULL);
     }
     numa_set_localalloc();
     terminate_flag_refchain = 0;
