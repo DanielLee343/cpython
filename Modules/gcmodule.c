@@ -105,6 +105,7 @@ unsigned long global_promo_size = 0;
 int global_do_migration = 0;   // swich for enable migration or not. 0: disable, 1: enable
 int global_demo_mode = 0;      // switch for demotion mode. 0: disable lazy demotion, 1: always lazy (stale impl), 2: always lazy (new impl), 3: adaptive lazy
 int global_hotness_thresh = 0; // switch for hotness threshold. 0: 0, 1: avg, 2: median, 3: mode
+double total_eagerness = 0.0, prev_eagerness = 0.0;
 
 // for adaptive lazy demo
 #define buffer_size 8
@@ -1709,9 +1710,11 @@ static int try_trigger_slow_scan()
     {
         is_migration = false;
 #ifdef FORCE_CLEAR_TEMPS
-        reset_pages_hotness();
+        // reset_pages_hotness();
+        reset_pages_bkt_hotness();
 #else
-        page_temp_cooling(0.5);
+        // page_temp_cooling(0.2);
+        page_bkt_cooling(0.1);
 #endif
         // fprintf(stderr, "clearing diff in metadata\n");
         {
@@ -3426,7 +3429,8 @@ double do_migration(void **pages, int num_pages, int dest_node)
     // populate page location here
     for (int i = 0; i < num_pages; i++)
     {
-        set_location_pages((uintptr_t)pages[i], dest_node);
+        // set_location_pages((uintptr_t)pages[i], dest_node);
+        set_location_pages_bkt((uintptr_t)pages[i], dest_node);
     }
     free(pages);
     free(nodes);
@@ -3496,7 +3500,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
                     fprintf(stderr, "unlikely, failed\n");
             }
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i]);
+            // insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i]);
+            insert_into_bucket((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i]);
         }
         free(pages_arr);
         free(status_arr);
@@ -3506,7 +3511,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
         for (unsigned int i = 0; i < old_num_op; i++)
         {
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+            // insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+            insert_into_bucket_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
         }
     }
     else if (reset_all_temps == 2)
@@ -3514,7 +3520,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
         for (unsigned int i = 0; i < prev_num_op; i++)
         {
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+            // insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
+            insert_into_bucket_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
         }
         int new_op_num = old_num_op - prev_num_op;
         assert(new_op_num > 0);
@@ -3554,7 +3561,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
         for (unsigned int i = prev_num_op; i < old_num_op; i++)
         {
             short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
-            insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i - prev_num_op]);
+            // insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i - prev_num_op]);
+            insert_into_bucket((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i - prev_num_op]);
         }
         free(pages_arr);
         free(status_arr);
@@ -3876,6 +3884,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
 {
     struct timespec start, end;
     double elapsed = 0;
+    // reset_bkt_page_num_pair();
 
     fprintf(stderr, "migration from %u to %u\n", start_idx, end_idx);
     fprintf(stderr, "--------start\n");
@@ -3884,50 +3893,6 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     int cold_warm_idx = 0, warm_hot_idx = 0, high = old_num_op - 1;
     int ret;
     bool enable_lazy = 0;
-    // {
-    //     clock_gettime(CLOCK_MONOTONIC, &start);
-    //     // cppDefaultSortAsc(all_temps, old_num_op);
-    //     // sort_dnf(&cold_warm_idx, &warm_hot_idx, &high);
-    //     // for (int i = start_idx; i < end_idx; i++)
-    //     // {
-    //     //     if (!(all_temps[i].diff & HOTNESS_MASK))
-    //     //         cold_warm_idx++;
-    //     // }
-    //     clock_gettime(CLOCK_MONOTONIC, &end);
-    //     elapsed = end.tv_sec - start.tv_sec;
-    //     elapsed += (end.tv_nsec - start.tv_nsec) / 1000000000.0;
-    //     fprintf(stderr, "DNF sort time: %.3f, for %lu\n", elapsed, old_num_op);
-    // }
-
-    // |   cold   |        warm     |        hot       |
-    // (<-----domote candidates---->)(promote candidates)
-    // 0    cold_warm_idx      warm_hot_idx   old_num_op
-    // unsigned int expected_num_cold = cold_warm_idx;
-    // unsigned int expected_num_hot = old_num_op - expected_num_cold;
-    // // under the following situation, no need to demote
-    // fprintf(stderr, "expected_num_hot: %d, expected_num_cold: %d\n", expected_num_hot, expected_num_cold);
-    // double cur_c_w_percent = (double)expected_num_cold / old_num_op;
-    // uint8_t hotness;
-
-    // demote to CXL
-    // if (fabs(cur_c_w_percent - prev_c_w_percent) < 0.01 && is_old_num_remain_still())
-    // {
-    //     fprintf(stderr, "relax domotion\n");
-    // }
-    // else
-    // if (expected_num_cold > 0)
-    // { // get cold page candidate
-    //     align_obj_2_page_bd_from_all_temps(0, expected_num_cold, 0);
-    // }
-    // if (expected_num_hot > 0)
-    // {
-    //     align_obj_2_page_bd_from_all_temps(expected_num_cold, old_num_op, 1);
-    // }
-    int cur_dram_free = check_dram_free();
-    cur_dram_free -= SYS_RESERVE; // adjust size
-    if (cur_dram_free <= 0)
-        cur_dram_free = 0;
-    fprintf(stderr, "cur_dram_free: %d\n", cur_dram_free);
 
     double look_page_location_time = align_obj_2_page_bd_revised(start_idx, end_idx); // update page temperature inside
     cur_migration_time += look_page_location_time;
@@ -3939,10 +3904,15 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     short split = 0; // <= split: cold, > split, hot
     // get distribution of hotness, then test different split
     if (global_hotness_thresh == 0)
+    {
+        if (global_bookkeep_args->doIO)
+        {
+            populate_hotness_vec(); // if you want to see distribution
+        }
         split = 0;
+    }
     else if (global_hotness_thresh == 1) // avg
     {
-        populate_hotness_vec();
         clock_gettime(CLOCK_MONOTONIC, &start);
         short avg = get_avg_hotness();
         clock_gettime(CLOCK_MONOTONIC, &end);
@@ -3975,35 +3945,49 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         split = mode;
     }
 
-    unsigned int max_size = get_pages_size();
+    // unsigned int max_size = get_pages_size();
+    unsigned int max_size = get_pages_bkt_size();
     int demo_size = 0, promo_size = 0;
     void **demote_pages = calloc(max_size, sizeof(void *));
     void **promote_pages = calloc(max_size, sizeof(void *));
+    print_bucket_stat();
 
     // void **demote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
     // void **promote_pages = numa_alloc_onnode(max_size * sizeof(void *), 0);
+    int free_dram_size = check_dram_free();
+    free_dram_size -= SYS_RESERVE; // adjust size
+    if (free_dram_size <= 0)
+        free_dram_size = 0;
+    int free_dram_pages = free_dram_size * 256;
+    int bkt_split = 1;
 
     if (global_demo_mode == 0)
     {
-        populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        bkt_split = determine_split_eager(0, free_dram_pages);
+        // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
     }
-    else if (global_demo_mode == 1)
+    else if (global_demo_mode == 1) // deprecated lazy demo mode, for future ref, do not use
     {
-        populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        bkt_split = determine_split_eager(0, free_dram_pages);
+        // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
     }
-    else if (global_demo_mode == 2)
+    else if (global_demo_mode == 2) // force lazy
     {
-        populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        bkt_split = determine_split_eager(1, free_dram_pages);
+        // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
     }
     else if (global_demo_mode == 3)
     {
-        // adaptive lazy demo, 1. get RSS distribution
+        // adaptive lazy demo
+        // 1. get RSS distribution
         int dram_percent = 0, cxl_percent = 0;
         get_rss_ratio(&dram_percent, &cxl_percent);
         fprintf(stderr, "Pages in node 0: %d%%\n", dram_percent);
         fprintf(stderr, "Pages in node 1: %d%%\n", cxl_percent);
         // 2. get eagerness
-        // llc miss eagerness
         {
             double dram_percent_norm = dram_percent / 100.0;
             fprintf(stderr, "DRAM percent: %.2f\n", dram_percent_norm);
@@ -4011,35 +3995,49 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             fprintf(stderr, "avg_llc_eagerness: %.2lf\n", avg_llc_eagerness);
             double avg_cxl_eagerness = calculate_averaged_eagerness(cxl_bw_arr);
             fprintf(stderr, "avg_cxl_eagerness: %.2lf\n", avg_cxl_eagerness);
-            double total_eagerness = dram_percent_norm * avg_llc_eagerness * avg_cxl_eagerness;
+            total_eagerness = dram_percent_norm * avg_llc_eagerness * avg_cxl_eagerness;
             fprintf(stderr, "total_eagerness: %.2f\n", total_eagerness);
             if (total_eagerness >= 0.2)
                 enable_lazy = false;
             else
                 enable_lazy = true;
         }
+        enable_lazy = false; // for testing
+        bkt_split = determine_split_eager(enable_lazy, free_dram_pages);
 
-        // if (dram_percent >= 30) // TODO, change adaptively
-        //     enable_lazy = 0;
-        // else
-        //     enable_lazy = 1;
+        if (!very_first_bk && (total_eagerness - prev_eagerness > 0)) // more eager, push right
+        {
+            bkt_split++;
+        }
+        else
+        {
+            // remain still, cannot push left since promo size must be <= demo size
+        }
+        prev_eagerness = total_eagerness; // bk prev_eagerness
+
         if (enable_lazy)
         {
             fprintf(stderr, "lazy demote\n");
-            populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+            // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+            populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
         }
         else
         {
             fprintf(stderr, "eager demote\n");
-            populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+            // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
+            populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
         }
         // for quick testing
         // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
+        // populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
     }
-
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
     fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
+    int cur_dram_free = check_dram_free();
+    cur_dram_free -= SYS_RESERVE; // adjust size
+    if (cur_dram_free <= 0)
+        cur_dram_free = 0;
     if (cur_dram_free < 50 && demo_size > 0 && promo_size > (cur_dram_free + 50) * 256) // if # need to promo > available DRAM size, then first to demotion
     {
         fprintf(stderr, "entering demotion\n");
@@ -4066,7 +4064,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             fprintf(stderr, "first_demo_time: %.3f\n", first_demo_time);
             cur_migration_time += first_demo_time;
             is_migration = true;
-            very_first_demote = false;
+            very_first_demote = false; // TODO: check once, unnecessary here?
         }
         else if (global_demo_mode == 1) // stale demo impl, do not use
         {
@@ -4156,17 +4154,10 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     //     }
     // }
 
-    // resize promo size if DRAM is scarce
-    int free_dram_size = check_dram_free();
-    free_dram_size -= SYS_RESERVE; // adjust size
-    if (free_dram_size <= 0)
-        free_dram_size = 0;
-    int free_dram_pages = free_dram_size * 256;
-
     if (promo_size > 0 && free_dram_pages > 0)
     {
         fprintf(stderr, "free dram pages: %d (pages), needed promo: %d (pages)\n", free_dram_pages, promo_size);
-        if (free_dram_pages < promo_size)
+        if (free_dram_pages < promo_size) // this is for safely
         {
             promo_size = free_dram_pages;
             fprintf(stderr, "resized promo_size: %d\n", promo_size);
@@ -4301,6 +4292,7 @@ void *manual_trigger_scan(void *arg)
         return NULL;
     }
     numa_set_preferred(0);
+    reset_bkt_page_num_pair();
     // global_op_set = kh_init(ptrset);
     // init_global_set_helper();
     // else if return 1: start triggering scan
@@ -4663,6 +4655,8 @@ void *manual_trigger_scan(void *arg)
     kh_destroy(ptrset_dup, last_demote_pages);
     // free_map();
     free_global();
-    free_pages();
+    // free_pages();
+    free_pages_bkt();
+    reset_bkt_page_num_pair();
     // destroy_global_set_helper();
 }

@@ -53,6 +53,20 @@ extern "C"
     void clear_hotness_vec();
     void dump_page_hotness(FILE *fd);
 
+    void reset_bkt_page_num_pair();
+    short get_bkt_idx(short hotness);
+    void insert_into_bucket(uintptr_t page_addr, short hotness, bool location);
+    void insert_into_bucket_only_exists(uintptr_t page_addr, short hotness);
+    void populate_mig_pages_eager(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split);
+    void populate_mig_pages_lazy(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split);
+    void free_pages_bkt();
+    unsigned int get_pages_bkt_size();
+    void reset_pages_bkt_hotness();
+    void page_bkt_cooling(float cooling_weight);
+    void set_location_pages_bkt(uintptr_t page, bool location);
+    void print_bucket_stat();
+    int determine_split_eager(bool check_lazy, int free_dram_pages);
+
 #ifdef __cplusplus
 }
 #endif

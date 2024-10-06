@@ -22,11 +22,17 @@ static std::unordered_set<uintptr_t> global_unordered_set;
 static std::unordered_map<uintptr_t, bool> global_unordered_map;
 static std::unordered_map<void *, int> pages_loc_hotness;
 // static std::unordered_map<uintptr_t, std::pair<short, bool>> map_pair;
-static std::unordered_map<uintptr_t, std::pair<short, std::pair<bool, bool>>> map_pair;
+static std::unordered_map<uintptr_t, std::pair<short, std::pair<bool, bool>>> map_pair; // <addr, <hotness, <loc, lazy>>>
 static std::vector<short> hotness_vec;
 static bool first_demo = true;
 extern OBJ_TEMP *all_temps;
 extern unsigned int old_num_op;
+
+#include <array>
+#include <math.h>                                                                            // for log2 function
+static std::unordered_map<uintptr_t, std::pair<short, std::pair<bool, bool>>> page_bkt_pair; // <addr, <bkt_idx, <loc, lazy>>>
+static std::array<int, 11> bkt_page_num_pair = {};
+static short hot_bkt_idx_position[2];
 
 // global_unordered_set
 extern "C" void insert_into_global(uintptr_t value)
@@ -146,13 +152,13 @@ extern "C" void insert_into_pages_only_exists(uintptr_t page_addr, short hotness
     }
 }
 
-extern "C" int check_in_pages(uintptr_t page)
+extern "C" int check_in_pages(uintptr_t page) // not used
 {
     // return pages_loc_hotness.find(page) != pages_loc_hotness.end();
     return map_pair.find(page) != map_pair.end();
 }
 
-extern "C" void erase_from_pages(uintptr_t page)
+extern "C" void erase_from_pages(uintptr_t page) // not used
 {
     // pages_loc_hotness.erase(page);
     map_pair.erase(page);
@@ -245,7 +251,7 @@ extern "C" void populate_mig_pages_wo_hit_again(void **demote_pages, void **prom
     }
 }
 
-extern "C" void get_page_hotness_bound(short *min_val, short *max_val)
+extern "C" void get_page_hotness_bound(short *min_val, short *max_val) // not used
 {
     short min = SHRT_MAX;
     short max = SHRT_MIN;
@@ -268,7 +274,7 @@ extern "C" void get_page_hotness_bound(short *min_val, short *max_val)
     *min_val = min;
     *max_val = max;
 }
-extern "C" void print_all_pages_hotness()
+extern "C" void print_all_pages_hotness() // for debugging, not used
 {
     for (auto it = map_pair.begin(); it != map_pair.end(); ++it)
     {
@@ -311,7 +317,8 @@ extern "C" void set_location_pages(uintptr_t page, bool location)
 
 extern "C" void populate_hotness_vec()
 {
-    for (const auto &entry : map_pair)
+    // for (const auto &entry : map_pair)
+    for (const auto &entry : page_bkt_pair)
     {
         hotness_vec.push_back(entry.second.first);
     }
@@ -428,4 +435,388 @@ extern "C" void dump_page_hotness(FILE *fd)
     {
         fprintf(fd, "%lld %hd\n", duration_in_ms.count(), number);
     }
+}
+
+extern "C" void dump_bucket_distribution(FILE *fd)
+{
+    auto now = std::chrono::system_clock::now();
+    auto duration_in_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+    fprintf(fd, "%lld ", duration_in_ms.count());
+    for (int i = 0; i < 11; i++)
+        fprintf(fd, "%d ", bkt_page_num_pair[i]);
+    fprintf(fd, "\n");
+}
+
+// bucket-based hotness classification
+// bucket_index: [min_hot, max_hot]
+// 0: 0-1
+// 1: 2-3
+// 2: 4-7
+// 3: 8-15
+// 4: 16-31
+// 5: 32-63
+// 6: 64-127
+// 7: 128-255
+// 8: 256-511
+// 9: 512-1023
+// 10: > 1023
+
+extern "C" void reset_bkt_page_num_pair()
+{
+    for (int i = 0; i < 11; i++)
+    {
+        bkt_page_num_pair[i] = 0;
+    }
+}
+
+short get_bkt_idx(short hotness)
+{
+    // if (hotness == -1)
+    //     return -1;
+    if (hotness == 0)
+        return 0;
+    else if (hotness > 1023)
+        return 10;
+    return (short)log2(hotness);
+}
+
+extern "C" void insert_into_bucket(uintptr_t page_addr, short hotness, bool location)
+{
+    // auto it = page_bkt_pair.find(page_addr);
+    // if (it != page_bkt_pair.end())
+    // {
+    //     short bkt_idx_before = get_bkt_idx(it->second.first);
+    //     it->second.first += hotness;
+    //     short bkt_idx_after = get_bkt_idx(it->second.first);
+    //     if (bkt_idx_before != bkt_idx_after) // if page already exists, update bkt_idx if needed
+    //     {
+    //         bkt_page_num_pair[bkt_idx_before]--;
+    //         bkt_page_num_pair[bkt_idx_after]++;
+    //         // fprintf(stderr, "before: %hd, after: %hd\n", bkt_idx_before, bkt_idx_after);
+    //     }
+    // }
+    // else
+    // {
+    //     page_bkt_pair[page_addr] = std::make_pair(hotness, std::make_pair(location, false));
+    //     short bkt_idx = get_bkt_idx(hotness);
+    //     bkt_page_num_pair[bkt_idx]++; // newly inserted pages, shouldn't be double calculated, thus safe to inc num
+    // }
+    auto [it, inserted] = page_bkt_pair.emplace(page_addr, std::make_pair(hotness, std::make_pair(location, false)));
+    if (!inserted)
+    {
+        // The page already exists, so update hotness and bucket index
+        short bkt_idx_before = get_bkt_idx(it->second.first);
+        it->second.first += hotness;
+        short bkt_idx_after = get_bkt_idx(it->second.first);
+
+        if (bkt_idx_before != bkt_idx_after)
+        {
+            // if (bkt_idx_before != -1)
+            {
+                bkt_page_num_pair[bkt_idx_before]--; // Only decrement if bkt_idx_before is valid
+            }
+            bkt_page_num_pair[bkt_idx_after]++;
+        }
+    }
+    else
+    {
+        // Newly inserted page
+        short bkt_idx = get_bkt_idx(hotness);
+        bkt_page_num_pair[bkt_idx]++;
+    }
+}
+
+extern "C" void insert_into_bucket_only_exists(uintptr_t page_addr, short hotness)
+{
+    auto it = page_bkt_pair.find(page_addr);
+    if (it != page_bkt_pair.end())
+    {
+        short bkt_idx_before = get_bkt_idx(it->second.first);
+        it->second.first += hotness;
+        short bkt_idx_after = get_bkt_idx(it->second.first);
+        if (bkt_idx_before != bkt_idx_after)
+        {
+            // if (bkt_idx_before != -1)
+            {
+                bkt_page_num_pair[bkt_idx_before]--; // Only decrement if bkt_idx_before is valid
+            }
+            bkt_page_num_pair[bkt_idx_after]++; // Always increment the new bucket
+        }
+        // else if (bkt_idx_before == 0 || bkt_idx_after == 0)
+        // {
+        //     fprintf(stderr, "before: %d, after: %d\n", bkt_idx_before, bkt_idx_after);
+        // }
+    }
+}
+static int demo_pages_split[11] = {0};
+static int promo_pages_split[11] = {0};
+
+extern "C" int determine_split_eager(bool check_lazy, int free_dram_pages)
+{
+    int total_pages = get_pages_bkt_size();
+
+    for (auto &it : page_bkt_pair)
+    {
+        short bkt_idx = get_bkt_idx(it.second.first);
+
+        if (!it.second.second.first)
+        {
+            if (check_lazy && !it.second.second.second)
+                continue;
+            // if (bkt_idx == 0)
+            //     demo_pages_split[0]++;
+            // if (bkt_idx <= 1)
+            //     demo_pages_split[1]++;
+            // if (bkt_idx <= 2)
+            //     demo_pages_split[2]++;
+            // if (bkt_idx <= 3)
+            //     demo_pages_split[3]++;
+            // if (bkt_idx <= 4)
+            //     demo_pages_split[4]++;
+            // if (bkt_idx <= 5)
+            //     demo_pages_split[5]++;
+            // if (bkt_idx <= 6)
+            //     demo_pages_split[6]++;
+            // if (bkt_idx <= 7)
+            //     demo_pages_split[7]++;
+            // if (bkt_idx <= 8)
+            //     demo_pages_split[8]++;
+            // if (bkt_idx <= 9)
+            //     demo_pages_split[9]++;
+            for (int i = 0; i <= 9; i++)
+            {
+                if (bkt_idx <= i)
+                {
+                    demo_pages_split[i]++;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < 10; i++) // here we don't consider largest bucket
+    {
+        promo_pages_split[i] = total_pages - demo_pages_split[i];
+    }
+    for (int i = 0; i < 10; i++)
+    {
+        fprintf(stderr, "demo: %d, promo: %d\n", demo_pages_split[i], promo_pages_split[i]);
+    }
+    fprintf(stderr, "\n");
+    // find the first bucket index that demo_size + free_dram will accomodate promo_size
+    int found = 0;
+    for (int i = 0; i < 10; i++)
+    {
+        if (demo_pages_split[i] + free_dram_pages >= demo_pages_split[i])
+        {
+            found = i;
+            break;
+        }
+    }
+    fprintf(stderr, "bkt split: %d\n", found);
+    for (int i = 0; i < 10; i++) // reset split array
+    {
+        demo_pages_split[i] = 0;
+        promo_pages_split[i] = 0;
+    }
+    return found;
+}
+
+extern "C" void populate_mig_pages_eager(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split)
+{
+    for (auto &it : page_bkt_pair)
+    {
+        short bkt_idx = get_bkt_idx(it.second.first);
+        if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
+        {
+            *demote_pages = (void *)it.first;
+            demote_pages++;
+            (*demo_size)++;
+        }
+    }
+    *free_dram_pages += *demo_size;
+    int total_avail_pages = *free_dram_pages;
+    for (int i = 10; i >= 0; i--)
+    {
+        total_avail_pages -= bkt_page_num_pair[i];
+        if (total_avail_pages < 0)
+        {
+            hot_bkt_idx_position[0] = i;
+            hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
+            break;
+        }
+    }
+    // Promote pages from CXL based on hottest bucket first
+    for (auto &it : page_bkt_pair)
+    {
+        short bkt_idx = get_bkt_idx(it.second.first);
+        if (*free_dram_pages <= 0)
+            break;
+        // Promote from buckets hotter than the determined hot bucket index
+        if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
+        {
+            *promote_pages = (void *)it.first;
+            promote_pages++;
+            (*promo_size)++;
+            it.second.second.second = false;
+            (*free_dram_pages)--;
+        }
+    }
+    // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
+    if (*free_dram_pages > 0)
+    {
+        for (auto &it : page_bkt_pair)
+        {
+            short bkt_idx = get_bkt_idx(it.second.first);
+
+            if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+            {
+                *promote_pages = (void *)it.first;
+                promote_pages++;
+                (*promo_size)++;
+                it.second.second.second = false;
+                (*free_dram_pages)--;
+            }
+
+            if (*free_dram_pages <= 0)
+                break;
+        }
+    }
+}
+
+extern "C" void populate_mig_pages_lazy(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split)
+{
+    if (first_demo)
+    {
+        populate_mig_pages_eager(demote_pages, promote_pages, demo_size, promo_size, free_dram_pages, bkt_split);
+        first_demo = false;
+        return;
+    }
+    // Demote cold pages from DRAM
+    for (auto &it : page_bkt_pair)
+    {
+        short bkt_idx = get_bkt_idx(it.second.first);
+        if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
+        {
+            if (it.second.second.second) // if hit again
+            {
+                *demote_pages = (void *)it.first;
+                demote_pages++;
+                (*demo_size)++;
+                it.second.second.second = false;
+            }
+            else
+            {
+                it.second.second.second = true;
+            }
+        }
+    }
+    *free_dram_pages += *demo_size;
+    // Determine how many pages can be promoted based on available DRAM pages
+    int total_avail_pages = *free_dram_pages;
+    for (int i = 10; i >= 0; i--)
+    {
+        total_avail_pages -= bkt_page_num_pair[i];
+        if (total_avail_pages < 0)
+        {
+            hot_bkt_idx_position[0] = i;
+            hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
+            break;
+        }
+    }
+    // Promote pages from CXL based on hottest bucket first
+    for (auto &it : page_bkt_pair)
+    {
+        short bkt_idx = get_bkt_idx(it.second.first);
+        if (*free_dram_pages <= 0)
+            break;
+        // Promote from buckets hotter than the determined hot bucket index
+        if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
+        {
+            *promote_pages = (void *)it.first;
+            promote_pages++;
+            (*promo_size)++;
+            it.second.second.second = false;
+            (*free_dram_pages)--;
+        }
+    }
+    // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
+    if (*free_dram_pages > 0)
+    {
+        for (auto &it : page_bkt_pair)
+        {
+            short bkt_idx = get_bkt_idx(it.second.first);
+
+            if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+            {
+                *promote_pages = (void *)it.first;
+                promote_pages++;
+                (*promo_size)++;
+                it.second.second.second = false;
+                (*free_dram_pages)--;
+            }
+
+            if (*free_dram_pages <= 0)
+                break;
+        }
+    }
+}
+
+extern "C" void free_pages_bkt()
+{
+    page_bkt_pair.clear();
+}
+
+extern "C" unsigned int get_pages_bkt_size()
+{
+    return page_bkt_pair.size();
+}
+
+extern "C" void reset_pages_bkt_hotness()
+{
+    fprintf(stderr, "resetting hotness\n");
+    for (auto it = page_bkt_pair.begin(); it != page_bkt_pair.end(); ++it)
+    {
+        it->second.first = 0;
+    }
+}
+
+extern "C" void page_bkt_cooling(float cooling_weight)
+{
+    fprintf(stderr, "page bkt cooling\n");
+    for (auto it = page_bkt_pair.begin(); it != page_bkt_pair.end(); ++it)
+    {
+        short bkt_idx_before = get_bkt_idx(it->second.first);
+        it->second.first *= cooling_weight;
+        short bkt_idx_after = get_bkt_idx(it->second.first);
+        if (bkt_idx_before != bkt_idx_after)
+        {
+            bkt_page_num_pair[bkt_idx_before]--;
+            bkt_page_num_pair[bkt_idx_after]++;
+        }
+    }
+}
+
+extern "C" void set_location_pages_bkt(uintptr_t page, bool location)
+{
+    auto it = page_bkt_pair.find(page);
+    if (it != page_bkt_pair.end())
+    {
+        if (location)
+            it->second.second.first = 1;
+        else
+            it->second.second.first = 0;
+        // // clear hotness
+        // it->second.first = 0;
+    }
+}
+
+extern "C" void print_bucket_stat()
+{
+    fprintf(stderr, "bucket stat:\n");
+    int total = 0;
+    for (int i = 0; i < 11; i++)
+    {
+        total += bkt_page_num_pair[i];
+        fprintf(stderr, "%d ", bkt_page_num_pair[i]);
+    }
+    fprintf(stderr, "\ntotal: %d\n", total);
 }
