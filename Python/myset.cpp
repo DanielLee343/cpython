@@ -554,12 +554,17 @@ static int promo_pages_split[11] = {0};
 extern "C" int determine_split_eager(bool check_lazy, int free_dram_pages)
 {
     int total_pages = get_pages_bkt_size();
+    for (int i = 0; i < 10; i++) // reset split array
+    {
+        demo_pages_split[i] = 0;
+        promo_pages_split[i] = 0;
+    }
 
     for (auto &it : page_bkt_pair)
     {
         short bkt_idx = get_bkt_idx(it.second.first);
 
-        if (!it.second.second.first)
+        if (!it.second.second.first) // in DRAM
         {
             if (check_lazy && !it.second.second.second)
                 continue;
@@ -583,12 +588,16 @@ extern "C" int determine_split_eager(bool check_lazy, int free_dram_pages)
             //     demo_pages_split[8]++;
             // if (bkt_idx <= 9)
             //     demo_pages_split[9]++;
-            for (int i = 0; i <= 9; i++)
+            // for (int i = 0; i <= 9; i++)
+            // {
+            //     if (bkt_idx <= i)
+            //     {
+            //         demo_pages_split[i]++;
+            //     }
+            // }
+            for (int i = bkt_idx; i <= 9; i++)
             {
-                if (bkt_idx <= i)
-                {
-                    demo_pages_split[i]++;
-                }
+                demo_pages_split[i]++;
             }
         }
     }
@@ -610,12 +619,6 @@ extern "C" int determine_split_eager(bool check_lazy, int free_dram_pages)
             found = i;
             break;
         }
-    }
-    fprintf(stderr, "bkt split: %d\n", found);
-    for (int i = 0; i < 10; i++) // reset split array
-    {
-        demo_pages_split[i] = 0;
-        promo_pages_split[i] = 0;
     }
     return found;
 }

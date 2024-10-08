@@ -72,7 +72,7 @@ struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
 int reset_all_temps = 1;
 long total_new_op_num = 0;
-size_t very_large_num_op = 41000000; // roughly 630 MB
+size_t very_large_num_op = 31000000; // roughly 630 MB
 #define PAGE_SIZE 4096
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define LEN_THRESHOLD 2
@@ -87,6 +87,12 @@ size_t very_large_num_op = 41000000; // roughly 630 MB
 #define HOTNESS_MASK 0x7F
 #define RESERVED_MEMORY_MB 200
 #define SYS_RESERVE 166
+
+#define AVG_COEFF -0.09869469
+#define STDDEV_COEFF -0.05838557
+#define NON_ZERO_COEFF 0.78084795
+#define SMALL_127_COEFF -0.68946689
+#define INTERCEPT_HOT 9.281685168308186
 // #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
@@ -1634,7 +1640,7 @@ void pre_alloc_all_temps()
 {
     // all_temps = (OBJ_TEMP *)calloc(num_op, sizeof(OBJ_TEMP));
     fprintf(stderr, "pre_allocate all_temps\n");
-    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), CXL_MASK);
+    all_temps = (OBJ_TEMP *)numa_alloc_onnode(very_large_num_op * sizeof(OBJ_TEMP), DRAM_MASK);
     if (all_temps == NULL)
     {
         fprintf(stderr, "Failed to allocate memory for all ops\n");
@@ -3291,6 +3297,80 @@ unsigned long max_num_hot = 0; // accumulated hot objs for 10 fast cycles
 double cur_hot_in_all = 0.0;   // current ratio of changed op within old_num_op
 unsigned int zero_hot_num = 0;
 
+void get_mlr_hotness_C()
+{
+    for (int i = 0; i < old_num_op; i++)
+    {
+        double sum = 0;
+        double sum_squared_diff = 0;
+        int non_zero_count = 0;
+        int smaller_than_127_count = 0;
+        for (int j = 0; j < NUM_SLOTS - 1; j++)
+        {
+            uint8_t value = all_temps[i].diffs[j];
+            sum += value;
+
+            if (value != 0)
+                non_zero_count++;
+
+            if (value < 127)
+                smaller_than_127_count++;
+        }
+        double average = sum / NUM_SLOTS;
+
+        for (int j = 0; j < NUM_SLOTS - 1; j++)
+        {
+            uint8_t value = all_temps[i].diffs[j];
+            sum_squared_diff += (value - average) * (value - average);
+        }
+
+        double variance = sum_squared_diff / NUM_SLOTS;
+        double std_dev = sqrt(variance);
+
+        int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average + STDDEV_COEFF * std_dev + NON_ZERO_COEFF * non_zero_count + SMALL_127_COEFF * smaller_than_127_count);
+        if (infered_hotness > 127) // max value for uint8_t 's 7 LSB, since MSB is used for dropout
+            infered_hotness = 127;
+        all_temps[i].diffs[NUM_SLOTS - 1] = (uint8_t)infered_hotness;
+    }
+}
+
+short get_mlr_hotness_C_per_obj(int i)
+{
+    double sum = 0;
+    double sum_squared_diff = 0;
+    int non_zero_count = 0;
+    int smaller_than_127_count = 0;
+    for (int j = 0; j < NUM_SLOTS - 1; j++)
+    {
+        uint8_t value = all_temps[i].diffs[j];
+        sum += value;
+
+        if (value != 0)
+            non_zero_count++;
+
+        if (value < 127)
+            smaller_than_127_count++;
+    }
+    if (sum != 0)
+        cur_fast_num_hot++;
+    double average = sum / NUM_SLOTS;
+
+    for (int j = 0; j < NUM_SLOTS - 1; j++)
+    {
+        uint8_t value = all_temps[i].diffs[j];
+        sum_squared_diff += (value - average) * (value - average);
+    }
+
+    double variance = sum_squared_diff / NUM_SLOTS;
+    double std_dev = sqrt(variance);
+
+    int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average + STDDEV_COEFF * std_dev + NON_ZERO_COEFF * non_zero_count + SMALL_127_COEFF * smaller_than_127_count);
+    if (infered_hotness > 127) // max value for uint8_t's 7 LSB, since MSB is used for dropout
+        infered_hotness = 127;
+    // all_temps[i].diffs[NUM_SLOTS - 1] = (uint8_t)infered_hotness;
+    return (short)infered_hotness;
+}
+
 int check_in_global_helper(uintptr_t op)
 {
     if (1)
@@ -3321,24 +3401,12 @@ void record_temp(int scan_idx, unsigned int start_idx, unsigned int end_idx)
         if (sigsetjmp(jump_buffer, 1) == 0)
         {
             // uint8_t diff = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
-            all_temps[i].diffs[scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
-            if (all_temps[i].diffs[scan_idx] != 0)
-            {
-                if (all_temps[i].diffs[scan_idx] == 127)
-                {
-                    all_temps[i].diffs[NUM_SLOTS - 1] += 1;
-                }
-                else
-                {
-                    all_temps[i].diffs[NUM_SLOTS - 1] += 2;
-                }
-                cur_fast_num_hot++;
-            }
-            else
-            {
-                zero_hot_num++;
-            }
-            all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
+            // all_temps[i].diffs[scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+
+            int current_growth = get_growth(all_temps[i].op);
+            int growth = abs(current_growth - all_temps[i].prev_refcnt);
+            all_temps[i].diffs[scan_idx] = (uint8_t)((growth >= 127) ? 127 : growth);
+            all_temps[i].prev_refcnt = current_growth;
         }
         else
         {
@@ -3499,7 +3567,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
                 else if (status_arr[i] < 0)
                     fprintf(stderr, "unlikely, failed\n");
             }
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            // short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            short cur_op_hotness = get_mlr_hotness_C_per_obj(i);
             // insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i]);
             insert_into_bucket((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i]);
         }
@@ -3510,7 +3579,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
     {
         for (unsigned int i = 0; i < old_num_op; i++)
         {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            // short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            short cur_op_hotness = get_mlr_hotness_C_per_obj(i);
             // insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
             insert_into_bucket_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
         }
@@ -3519,7 +3589,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
     {
         for (unsigned int i = 0; i < prev_num_op; i++)
         {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            // short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            short cur_op_hotness = get_mlr_hotness_C_per_obj(i);
             // insert_into_pages_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
             insert_into_bucket_only_exists((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness);
         }
@@ -3560,7 +3631,8 @@ double align_obj_2_page_bd_revised(unsigned int start_idx, unsigned int end_idx)
         }
         for (unsigned int i = prev_num_op; i < old_num_op; i++)
         {
-            short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            // short cur_op_hotness = all_temps[i].diffs[NUM_SLOTS - 1] & HOTNESS_MASK;
+            short cur_op_hotness = get_mlr_hotness_C_per_obj(i);
             // insert_into_pages((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i - prev_num_op]);
             insert_into_bucket((uintptr_t)all_temps[i].op & PAGE_MASK, cur_op_hotness, (bool)status_arr[i - prev_num_op]);
         }
@@ -3674,6 +3746,8 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
         return 0;
     }
     pages_in_node_0 -= (very_large_num_op * sizeof(OBJ_TEMP)) / PAGE_SIZE;
+    if (pages_in_node_0 <= 0)
+        pages_in_node_0 = 0;
     *dram_percent = (int)((pages_in_node_0 * 100.0) / total_pages);
     *cxl_percent = (int)((pages_in_node_1 * 100.0) / total_pages);
 
@@ -3708,12 +3782,13 @@ void *parse_llc_miss_bw_routine(void *args)
         fclose(file1);
         if (llc_load_miss_percent == 0.0)
         {
-            fprintf(stderr, "LLC-load-misses percentage not found.\n");
+            fprintf(stderr, "error, LLC-load-misses percentage not found.\n");
         }
 
         // parse bw file
         if (fgets(bw_line, sizeof(bw_line), file2) != NULL)
         {
+            sscanf(bw_line, "%lf %lf", &dram_bw, &cxl_bw);
             if (sscanf(bw_line, "%lf %lf", &dram_bw, &cxl_bw) == 2)
             {
                 fprintf(stderr, "dram_bw = %.2lf, cxl_bw = %.2lf\n", dram_bw, cxl_bw);
@@ -3763,18 +3838,18 @@ void *parse_llc_miss_bw_routine(void *args)
         // if(llc_load_miss_percent >> avg_llc_miss) // do something
 
         // printing
-        for (int i = 0; i < buffer_size; i++)
-        {
-            fprintf(stderr, "%.2lf ", llc_miss_arr[i]);
-        }
-        fprintf(stderr, "\n");
-        for (int i = 0; i < buffer_size; i++)
-        {
-            fprintf(stderr, "%.2lf ", cxl_bw_arr[i]);
-        }
-        fprintf(stderr, "\n");
-        fprintf(stderr, "buffer_index: %d, num_non_zero: %d, avg llc miss: %.2lf, avg cxl bw: %.2lf\n", buffer_index, num_non_zero_llc_miss, avg_llc_miss, avg_cxl_bw);
-        fprintf(stderr, "\n");
+        // for (int i = 0; i < buffer_size; i++)
+        // {
+        //     fprintf(stderr, "%.2lf ", llc_miss_arr[i]);
+        // }
+        // fprintf(stderr, "\n");
+        // for (int i = 0; i < buffer_size; i++)
+        // {
+        //     fprintf(stderr, "%.2lf ", cxl_bw_arr[i]);
+        // }
+        // fprintf(stderr, "\n");
+        // fprintf(stderr, "buffer_index: %d, num_non_zero: %d, avg llc miss: %.2lf, avg cxl bw: %.2lf\n", buffer_index, num_non_zero_llc_miss, avg_llc_miss, avg_cxl_bw);
+        // fprintf(stderr, "\n");
         sleep(1);
         // struct timespec req;
         // req.tv_sec = 1;
@@ -3897,6 +3972,10 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     double look_page_location_time = align_obj_2_page_bd_revised(start_idx, end_idx); // update page temperature inside
     cur_migration_time += look_page_location_time;
     fprintf(stderr, "look_page_location_time: %.3f\n", look_page_location_time);
+
+    max_num_hot = max(max_num_hot, cur_fast_num_hot);
+    cur_hot_in_all = (double)cur_fast_num_hot / old_num_op;
+    fprintf(stderr, "cur_fast_num_hot: %ld, old_num_op: %lu, cur_hot_in_all: %.3f\n", cur_fast_num_hot, old_num_op, cur_hot_in_all);
     // return 0.0;
     // short min_hotness, max_hotness;
     // get_page_hotness_bound(&min_hotness, &max_hotness);
@@ -3960,6 +4039,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         free_dram_size = 0;
     int free_dram_pages = free_dram_size * 256;
     int bkt_split = 1;
+    fprintf(stderr, "free_dram_pages: %d\n", free_dram_pages);
 
     if (global_demo_mode == 0)
     {
@@ -4002,7 +4082,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             else
                 enable_lazy = true;
         }
-        enable_lazy = false; // for testing
+        // enable_lazy = false; // for testing
         bkt_split = determine_split_eager(enable_lazy, free_dram_pages);
 
         if (!very_first_bk && (total_eagerness - prev_eagerness > 0)) // more eager, push right
@@ -4013,7 +4093,8 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         {
             // remain still, cannot push left since promo size must be <= demo size
         }
-        prev_eagerness = total_eagerness; // bk prev_eagerness
+        fprintf(stderr, "bkt split: %d\n", bkt_split);
+        prev_eagerness = total_eagerness; // update prev_eagerness
 
         if (enable_lazy)
         {
@@ -4215,7 +4296,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
 //  1: trigger scan
 int trigger_bk()
 {
-    return 1; // dummy switch quick testing
+    // return 1; // dummy switch quick testing
     long long total_dram_size;
     long long free_dram_size;
     total_dram_size = numa_node_size(DRAM_MASK, NULL);
@@ -4422,34 +4503,13 @@ void *manual_trigger_scan(void *arg)
                     }
                     if (sigsetjmp(jump_buffer, 1) == 0)
                     {
-                        all_temps[i].diffs[fast_scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
-                        if (all_temps[i].diffs[fast_scan_idx] != 0)
-                        {
-                            // foundInner = (uintptr_t)all_temps[i].op;
-                            // if (foundInner > prev_changed_max)
-                            // {
-                            //     prev_changed_max = foundInner;
-                            // }
-                            // else if (foundInner < prev_changed_min && foundInner > LOWER_BOUND)
-                            // {
-                            //     prev_changed_min = foundInner;
-                            // }
-                            // populate_hotness_runtime(fast_scan_idx);
-                            if (all_temps[i].diffs[fast_scan_idx] == 127)
-                            {
-                                all_temps[i].diffs[NUM_SLOTS - 1] += 1;
-                            }
-                            else
-                            {
-                                all_temps[i].diffs[NUM_SLOTS - 1] += 2;
-                            }
-                            cur_fast_num_hot++;
-                        }
-                        else
-                        {
-                            zero_hot_num++;
-                        }
-                        all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
+                        // all_temps[i].diffs[fast_scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+                        // all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
+
+                        int current_growth = get_growth(all_temps[i].op);
+                        int growth = abs(current_growth - all_temps[i].prev_refcnt);
+                        all_temps[i].diffs[fast_scan_idx] = (uint8_t)((growth >= 127) ? 127 : growth);
+                        all_temps[i].prev_refcnt = current_growth;
                     }
                     else
                     {
@@ -4486,24 +4546,12 @@ void *manual_trigger_scan(void *arg)
                         }
                         if (sigsetjmp(jump_buffer, 1) == 0)
                         {
-                            all_temps[i].diffs[fast_scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
-                            if (all_temps[i].diffs[fast_scan_idx] != 0)
-                            {
-                                if (all_temps[i].diffs[fast_scan_idx] == 127)
-                                {
-                                    all_temps[i].diffs[NUM_SLOTS - 1] += 1;
-                                }
-                                else
-                                {
-                                    all_temps[i].diffs[NUM_SLOTS - 1] += 2;
-                                }
-                                cur_fast_num_hot++;
-                            }
-                            else
-                            {
-                                zero_hot_num++;
-                            }
-                            all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
+                            // all_temps[i].diffs[fast_scan_idx] = (abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt) >= 127) ? 127 : (uint8_t)abs(get_growth(all_temps[i].op) - all_temps[i].prev_refcnt);
+                            // all_temps[i].prev_refcnt = get_growth(all_temps[i].op);
+                            int current_growth = get_growth(all_temps[i].op);
+                            int growth = abs(current_growth - all_temps[i].prev_refcnt);
+                            all_temps[i].diffs[fast_scan_idx] = (uint8_t)((growth >= 127) ? 127 : growth);
+                            all_temps[i].prev_refcnt = current_growth;
                         }
                         else
                         {
@@ -4544,9 +4592,6 @@ void *manual_trigger_scan(void *arg)
             total_fast_num++;
         fprintf(stderr, "total_fast_num: %d, total_fast_time: %.3f\n", total_fast_num, total_fast_time);
 
-        max_num_hot = max(max_num_hot, cur_fast_num_hot);
-        cur_hot_in_all = (double)cur_fast_num_hot / old_num_op;
-        fprintf(stderr, "cur_fast_num_hot: %ld, old_num_op: %lu, cur_hot_in_all: %.3f\n", cur_fast_num_hot, old_num_op, cur_hot_in_all);
         // fprintf(stderr, "", );
         // relaxed fast
         // if (fast_scan_idx != 0 || (fast_scan_idx == 0 && reset_all_temps != 1))
