@@ -614,151 +614,172 @@ extern "C" int determine_split_eager(bool check_lazy, int free_dram_pages)
     int found = 0;
     for (int i = 0; i < 10; i++)
     {
-        if (demo_pages_split[i] + free_dram_pages >= demo_pages_split[i])
+        if (demo_pages_split[i] + free_dram_pages >= promo_pages_split[i]) // find the first bucket idx that can take all promo pages
         {
-            found = i;
-            break;
+            fprintf(stderr, "demo_pages_split[%d]: %d, free_pages: %d\n", i, demo_pages_split[i], free_dram_pages);
+            return i;
         }
+        found = i;
     }
     return found;
 }
 
-extern "C" void populate_mig_pages_eager(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split)
+extern "C" void populate_mig_pages_eager(void **pages, int *size, int *free_dram_pages, int bkt_split, bool is_promo)
 {
-    for (auto &it : page_bkt_pair)
-    {
-        short bkt_idx = get_bkt_idx(it.second.first);
-        if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
-        {
-            *demote_pages = (void *)it.first;
-            demote_pages++;
-            (*demo_size)++;
-        }
-    }
-    *free_dram_pages += *demo_size;
-    int total_avail_pages = *free_dram_pages;
-    for (int i = 10; i >= 0; i--)
-    {
-        total_avail_pages -= bkt_page_num_pair[i];
-        if (total_avail_pages < 0)
-        {
-            hot_bkt_idx_position[0] = i;
-            hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
-            break;
-        }
-    }
-    // Promote pages from CXL based on hottest bucket first
-    for (auto &it : page_bkt_pair)
-    {
-        short bkt_idx = get_bkt_idx(it.second.first);
-        if (*free_dram_pages <= 0)
-            break;
-        // Promote from buckets hotter than the determined hot bucket index
-        if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
-        {
-            *promote_pages = (void *)it.first;
-            promote_pages++;
-            (*promo_size)++;
-            it.second.second.second = false;
-            (*free_dram_pages)--;
-        }
-    }
-    // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
-    if (*free_dram_pages > 0)
+    if (!is_promo)
     {
         for (auto &it : page_bkt_pair)
         {
             short bkt_idx = get_bkt_idx(it.second.first);
-
-            if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+            if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
+            // if (bkt_idx <= bkt_split) // is cold
             {
-                *promote_pages = (void *)it.first;
-                promote_pages++;
-                (*promo_size)++;
+                *pages = (void *)it.first;
+                pages++;
+                (*size)++;
+            }
+        }
+        // *free_dram_pages += *demo_size; // no need, re-calculate later for promo
+    }
+    else
+    {
+        int total_avail_pages = *free_dram_pages;
+        fprintf(stderr, "total_avail_pages: %d\n", total_avail_pages);
+        for (int i = 10; i >= 0; i--)
+        {
+            total_avail_pages -= bkt_page_num_pair[i];
+            if (total_avail_pages < 0)
+            {
+                hot_bkt_idx_position[0] = i;
+                hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
+                break;
+            }
+        }
+        fprintf(stderr, "trying to promote bkt idx larger than: %d\n", hot_bkt_idx_position[0]);
+        // Promote pages from CXL based on hottest bucket first
+        for (auto &it : page_bkt_pair)
+        {
+            if ((*free_dram_pages) <= 0)
+                break;
+            short bkt_idx = get_bkt_idx(it.second.first);
+            // Promote from buckets hotter than the determined hot bucket index
+            if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
+            // if (bkt_idx > hot_bkt_idx_position[0])
+            {
+                *pages = (void *)it.first;
+                pages++;
+                (*size)++;
                 it.second.second.second = false;
                 (*free_dram_pages)--;
             }
+        }
+        // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
+        if (*free_dram_pages > 0)
+        {
+            for (auto &it : page_bkt_pair)
+            {
+                short bkt_idx = get_bkt_idx(it.second.first);
 
-            if (*free_dram_pages <= 0)
-                break;
+                if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+                // if (bkt_idx == hot_bkt_idx_position[0] && *free_dram_pages > 0)
+                {
+                    *pages = (void *)it.first;
+                    pages++;
+                    (*size)++;
+                    it.second.second.second = false;
+                    (*free_dram_pages)--;
+                }
+
+                if (*free_dram_pages <= 0)
+                    break;
+            }
         }
     }
 }
 
-extern "C" void populate_mig_pages_lazy(void **demote_pages, void **promote_pages, int *demo_size, int *promo_size, int *free_dram_pages, int bkt_split)
+extern "C" void populate_mig_pages_lazy(void **pages, int *size, int *free_dram_pages, int bkt_split, bool is_promo)
 {
     if (first_demo)
     {
-        populate_mig_pages_eager(demote_pages, promote_pages, demo_size, promo_size, free_dram_pages, bkt_split);
+        populate_mig_pages_eager(pages, size, free_dram_pages, bkt_split, is_promo);
         first_demo = false;
         return;
     }
-    // Demote cold pages from DRAM
-    for (auto &it : page_bkt_pair)
-    {
-        short bkt_idx = get_bkt_idx(it.second.first);
-        if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
-        {
-            if (it.second.second.second) // if hit again
-            {
-                *demote_pages = (void *)it.first;
-                demote_pages++;
-                (*demo_size)++;
-                it.second.second.second = false;
-            }
-            else
-            {
-                it.second.second.second = true;
-            }
-        }
-    }
-    *free_dram_pages += *demo_size;
-    // Determine how many pages can be promoted based on available DRAM pages
-    int total_avail_pages = *free_dram_pages;
-    for (int i = 10; i >= 0; i--)
-    {
-        total_avail_pages -= bkt_page_num_pair[i];
-        if (total_avail_pages < 0)
-        {
-            hot_bkt_idx_position[0] = i;
-            hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
-            break;
-        }
-    }
-    // Promote pages from CXL based on hottest bucket first
-    for (auto &it : page_bkt_pair)
-    {
-        short bkt_idx = get_bkt_idx(it.second.first);
-        if (*free_dram_pages <= 0)
-            break;
-        // Promote from buckets hotter than the determined hot bucket index
-        if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
-        {
-            *promote_pages = (void *)it.first;
-            promote_pages++;
-            (*promo_size)++;
-            it.second.second.second = false;
-            (*free_dram_pages)--;
-        }
-    }
-    // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
-    if (*free_dram_pages > 0)
+    if (!is_promo) // Demote cold pages from DRAM
     {
         for (auto &it : page_bkt_pair)
         {
             short bkt_idx = get_bkt_idx(it.second.first);
-
-            if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+            if (bkt_idx <= bkt_split && !it.second.second.first) // is cold && in DRAM
+            // if (bkt_idx <= bkt_split) // is cold
             {
-                *promote_pages = (void *)it.first;
-                promote_pages++;
-                (*promo_size)++;
+                if (it.second.second.second) // if hit again
+                {
+                    *pages = (void *)it.first;
+                    pages++;
+                    (*size)++;
+                    it.second.second.second = false;
+                }
+                else
+                {
+                    it.second.second.second = true;
+                }
+            }
+        }
+        // *free_dram_pages += *size; // no need
+    }
+    else
+    {
+        // Determine how many pages can be promoted based on available DRAM pages
+        int total_avail_pages = *free_dram_pages;
+        fprintf(stderr, "total_avail_pages: %d\n", total_avail_pages);
+        for (int i = 10; i >= 0; i--)
+        {
+            total_avail_pages -= bkt_page_num_pair[i];
+            if (total_avail_pages < 0)
+            {
+                hot_bkt_idx_position[0] = i;
+                hot_bkt_idx_position[1] = total_avail_pages + bkt_page_num_pair[i];
+                break;
+            }
+        }
+        // Promote pages from CXL based on hottest bucket first
+        for (auto &it : page_bkt_pair)
+        {
+            short bkt_idx = get_bkt_idx(it.second.first);
+            if (*free_dram_pages <= 0)
+                break;
+            // Promote from buckets hotter than the determined hot bucket index
+            if (bkt_idx > hot_bkt_idx_position[0] && it.second.second.first)
+            // if (bkt_idx > hot_bkt_idx_position[0])
+            {
+                *pages = (void *)it.first;
+                pages++;
+                (*size)++;
                 it.second.second.second = false;
                 (*free_dram_pages)--;
             }
+        }
+        // Promote pages from the current "hot bucket" until free DRAM pages are exhausted
+        if (*free_dram_pages > 0)
+        {
+            for (auto &it : page_bkt_pair)
+            {
+                short bkt_idx = get_bkt_idx(it.second.first);
 
-            if (*free_dram_pages <= 0)
-                break;
+                if (bkt_idx == hot_bkt_idx_position[0] && it.second.second.first && *free_dram_pages > 0)
+                // if (bkt_idx == hot_bkt_idx_position[0] && *free_dram_pages > 0)
+                {
+                    *pages = (void *)it.first;
+                    pages++;
+                    (*size)++;
+                    it.second.second.second = false;
+                    (*free_dram_pages)--;
+                }
+
+                if (*free_dram_pages <= 0)
+                    break;
+            }
         }
     }
 }

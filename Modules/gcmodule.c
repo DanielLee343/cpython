@@ -72,7 +72,7 @@ struct timespec cutoff_start, cutoff_current;
 long cutoff_counter = 0;
 int reset_all_temps = 1;
 long total_new_op_num = 0;
-size_t very_large_num_op = 31000000; // roughly 630 MB
+size_t very_large_num_op = 41000000; // roughly 630 MB
 #define PAGE_SIZE 4096
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define LEN_THRESHOLD 2
@@ -88,11 +88,12 @@ size_t very_large_num_op = 31000000; // roughly 630 MB
 #define RESERVED_MEMORY_MB 200
 #define SYS_RESERVE 166
 
-#define AVG_COEFF -0.09869469
-#define STDDEV_COEFF -0.05838557
-#define NON_ZERO_COEFF 0.78084795
-#define SMALL_127_COEFF -0.68946689
-#define INTERCEPT_HOT 9.281685168308186
+#define AVG_COEFF -0.04157018
+#define STDDEV_COEFF 0.01717087
+#define NON_ZERO_COEFF 0.20755456
+#define SMALL_127_COEFF -0.29469896
+#define RANGE_COEFF -0.0458398
+#define INTERCEPT_HOT 8.520855288592891
 // #define METADATA_SIZE 1024 // reserved metadata size in MB
 bool early_return = false;
 bool skip_future_slow = false;
@@ -3305,6 +3306,8 @@ void get_mlr_hotness_C()
         double sum_squared_diff = 0;
         int non_zero_count = 0;
         int smaller_than_127_count = 0;
+        int min = all_temps[i].diffs[0];
+        int max = all_temps[i].diffs[0];
         for (int j = 0; j < NUM_SLOTS - 1; j++)
         {
             uint8_t value = all_temps[i].diffs[j];
@@ -3315,6 +3318,14 @@ void get_mlr_hotness_C()
 
             if (value < 127)
                 smaller_than_127_count++;
+            if (all_temps[i].diffs[j] < min)
+            {
+                min = all_temps[i].diffs[j];
+            }
+            if (all_temps[i].diffs[j] > max)
+            {
+                max = all_temps[i].diffs[j];
+            }
         }
         double average = sum / NUM_SLOTS;
 
@@ -3326,11 +3337,14 @@ void get_mlr_hotness_C()
 
         double variance = sum_squared_diff / NUM_SLOTS;
         double std_dev = sqrt(variance);
+        int range = max - min;
 
-        int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average + STDDEV_COEFF * std_dev + NON_ZERO_COEFF * non_zero_count + SMALL_127_COEFF * smaller_than_127_count);
+        int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average + STDDEV_COEFF * std_dev +
+                                    NON_ZERO_COEFF * non_zero_count + SMALL_127_COEFF * smaller_than_127_count +
+                                    RANGE_COEFF * range);
         if (infered_hotness > 127) // max value for uint8_t 's 7 LSB, since MSB is used for dropout
             infered_hotness = 127;
-        all_temps[i].diffs[NUM_SLOTS - 1] = (uint8_t)infered_hotness;
+        all_temps[i].diffs[NUM_SLOTS - 1] = (uint8_t)infered_hotness; // TODO, if later wants to remain drop_off, this must be masked only 7 LSB
     }
 }
 
@@ -3340,6 +3354,9 @@ short get_mlr_hotness_C_per_obj(int i)
     double sum_squared_diff = 0;
     int non_zero_count = 0;
     int smaller_than_127_count = 0;
+    int min = all_temps[i].diffs[0];
+    int max = all_temps[i].diffs[0];
+
     for (int j = 0; j < NUM_SLOTS - 1; j++)
     {
         uint8_t value = all_temps[i].diffs[j];
@@ -3350,24 +3367,38 @@ short get_mlr_hotness_C_per_obj(int i)
 
         if (value < 127)
             smaller_than_127_count++;
-    }
-    if (sum != 0)
-        cur_fast_num_hot++;
-    double average = sum / NUM_SLOTS;
 
+        if (value < min)
+            min = value;
+
+        if (value > max)
+            max = value;
+    }
+
+    double average = sum / (NUM_SLOTS - 1);
     for (int j = 0; j < NUM_SLOTS - 1; j++)
     {
         uint8_t value = all_temps[i].diffs[j];
         sum_squared_diff += (value - average) * (value - average);
     }
 
-    double variance = sum_squared_diff / NUM_SLOTS;
+    double variance = sum_squared_diff / (NUM_SLOTS - 1);
     double std_dev = sqrt(variance);
 
-    int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average + STDDEV_COEFF * std_dev + NON_ZERO_COEFF * non_zero_count + SMALL_127_COEFF * smaller_than_127_count);
-    if (infered_hotness > 127) // max value for uint8_t's 7 LSB, since MSB is used for dropout
+    int range = max - min;
+
+    int infered_hotness = (int)(INTERCEPT_HOT + AVG_COEFF * average +
+                                STDDEV_COEFF * std_dev +
+                                NON_ZERO_COEFF * non_zero_count +
+                                SMALL_127_COEFF * smaller_than_127_count +
+                                RANGE_COEFF * range);
+
+    if (infered_hotness > 127)
         infered_hotness = 127;
-    // all_temps[i].diffs[NUM_SLOTS - 1] = (uint8_t)infered_hotness;
+
+    if (sum != 0)
+        cur_fast_num_hot++;
+
     return (short)infered_hotness;
 }
 
@@ -3715,7 +3746,6 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
     if (!numa_maps)
     {
         perror("Error opening /proc/self/numa_maps");
-        return 1;
     }
     int pages_in_node_0 = 0, pages_in_node_1 = 0;
     while (fgets(line, sizeof(line), numa_maps))
@@ -3743,15 +3773,13 @@ void get_rss_ratio(int *dram_percent, int *cxl_percent)
     if (total_pages == 0)
     {
         printf("No pages found in node 0 or node 1.\n");
-        return 0;
     }
     pages_in_node_0 -= (very_large_num_op * sizeof(OBJ_TEMP)) / PAGE_SIZE;
     if (pages_in_node_0 <= 0)
         pages_in_node_0 = 0;
     *dram_percent = (int)((pages_in_node_0 * 100.0) / total_pages);
-    *cxl_percent = (int)((pages_in_node_1 * 100.0) / total_pages);
-
-    return 0;
+    // *cxl_percent = (int)((pages_in_node_1 * 100.0) / total_pages);
+    *cxl_percent = 100 - *dram_percent;
 }
 
 void *parse_llc_miss_bw_routine(void *args)
@@ -4038,26 +4066,29 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     if (free_dram_size <= 0)
         free_dram_size = 0;
     int free_dram_pages = free_dram_size * 256;
-    int bkt_split = 1;
+    int bkt_split = 0;
     fprintf(stderr, "free_dram_pages: %d\n", free_dram_pages);
 
     if (global_demo_mode == 0)
     {
         bkt_split = determine_split_eager(0, free_dram_pages);
         // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
-        populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        // populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        populate_mig_pages_eager(demote_pages, &demo_size, &free_dram_pages, bkt_split, false);
     }
     else if (global_demo_mode == 1) // deprecated lazy demo mode, for future ref, do not use
     {
         bkt_split = determine_split_eager(0, free_dram_pages);
         // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
-        populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        // populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        populate_mig_pages_eager(demote_pages, &demo_size, &free_dram_pages, bkt_split, false);
     }
     else if (global_demo_mode == 2) // force lazy
     {
         bkt_split = determine_split_eager(1, free_dram_pages);
         // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
-        populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        // populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+        populate_mig_pages_lazy(demote_pages, &demo_size, &free_dram_pages, bkt_split, false);
     }
     else if (global_demo_mode == 3)
     {
@@ -4077,36 +4108,46 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
             fprintf(stderr, "avg_cxl_eagerness: %.2lf\n", avg_cxl_eagerness);
             total_eagerness = dram_percent_norm * avg_llc_eagerness * avg_cxl_eagerness;
             fprintf(stderr, "total_eagerness: %.2f\n", total_eagerness);
-            if (total_eagerness >= 0.2)
+            if (total_eagerness >= 0.03)
                 enable_lazy = false;
             else
                 enable_lazy = true;
         }
         // enable_lazy = false; // for testing
-        bkt_split = determine_split_eager(enable_lazy, free_dram_pages);
-
-        if (!very_first_bk && (total_eagerness - prev_eagerness > 0)) // more eager, push right
+        if (very_first_bk)
         {
-            bkt_split++;
+            bkt_split = 5;
         }
         else
         {
-            // remain still, cannot push left since promo size must be <= demo size
+            bkt_split = determine_split_eager(enable_lazy, free_dram_pages);
+            fprintf(stderr, "bkt_split after calc: %d\n", bkt_split);
+
+            if (total_eagerness - prev_eagerness < 0) // less eager, push left
+            {
+                bkt_split = (--bkt_split < 0) ? 0 : bkt_split;
+            }
+            else
+            {
+                // do nothing, shouldn't push right since if so there should be pages in both demo and promo
+            }
         }
-        fprintf(stderr, "bkt split: %d\n", bkt_split);
+        fprintf(stderr, "bkt_split final: %d\n", bkt_split);
         prev_eagerness = total_eagerness; // update prev_eagerness
 
         if (enable_lazy)
         {
             fprintf(stderr, "lazy demote\n");
             // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
-            populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+            // populate_mig_pages_lazy(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+            populate_mig_pages_lazy(demote_pages, &demo_size, &free_dram_pages, bkt_split, false);
         }
         else
         {
             fprintf(stderr, "eager demote\n");
             // populate_mig_pages_wo_hit_again(demote_pages, promote_pages, &demo_size, &promo_size, split);
-            populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+            // populate_mig_pages_eager(demote_pages, promote_pages, &demo_size, &promo_size, &free_dram_pages, bkt_split);
+            populate_mig_pages_eager(demote_pages, &demo_size, &free_dram_pages, bkt_split, false); // populate demo first
         }
         // for quick testing
         // populate_mig_pages(demote_pages, promote_pages, &demo_size, &promo_size, split);
@@ -4114,20 +4155,18 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
     }
     // int dupCount = count_duplicates(promote_pages, promo_size, demote_pages, demo_size);
     // fprintf(stderr, "Number of duplicates: %d\n", dupCount);
-    fprintf(stderr, "before filtering demo_size: %d, promo_size: %d\n", demo_size, promo_size);
-    int cur_dram_free = check_dram_free();
-    cur_dram_free -= SYS_RESERVE; // adjust size
-    if (cur_dram_free <= 0)
-        cur_dram_free = 0;
-    if (cur_dram_free < 50 && demo_size > 0 && promo_size > (cur_dram_free + 50) * 256) // if # need to promo > available DRAM size, then first to demotion
+    fprintf(stderr, "before filtering demo_size: %d\n", demo_size);
+
+    if (free_dram_size < 50 && demo_size > 0) // if # need to promo > available DRAM size, then first to demotion
     {
+        // && promo_size > (cur_dram_free + 50) * 256
         fprintf(stderr, "entering demotion\n");
         // if(promo_size <= (cur_dram_free + 50) * 256)
         // continue;
         // if (global_demo_mode == 2 || (global_demo_mode == 3 && enable_lazy))
         //     goto do_demo;
-        if (promo_size < demo_size) // no need to demote all of them
-            demo_size = promo_size;
+        // if (promo_size < demo_size) // no need to demote all of them
+        //     demo_size = promo_size;
         // else // means we need to do demo anyway regardless lazy or not
         // {
         //     // forced_demo = true;
@@ -4142,7 +4181,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
                 demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
             }
             double first_demo_time = do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
-            fprintf(stderr, "first_demo_time: %.3f\n", first_demo_time);
+            fprintf(stderr, "demo_time: %.3f\n", first_demo_time);
             cur_migration_time += first_demo_time;
             is_migration = true;
             very_first_demote = false; // TODO: check once, unnecessary here?
@@ -4161,7 +4200,7 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
                     demote_pages = realloc(demote_pages, demo_size * sizeof(void *));
                 }
                 double first_demo_time = do_migration(demote_pages, demo_size, CXL_MASK); // Demote to CXL
-                fprintf(stderr, "first_demo_time: %.3f\n", first_demo_time);
+                fprintf(stderr, "demo_time: %.3f\n", first_demo_time);
                 cur_migration_time += first_demo_time;
                 is_migration = true;
                 very_first_demote = false;
@@ -4220,24 +4259,18 @@ double try_trigger_migration_revised(unsigned int start_idx, unsigned int end_id
         free(demote_pages);
         demote_pages = NULL;
     }
-    // if (demo_size > 0)
-    // {
-    //     if (promo_size < 256 || very_first_mig)
-    //     {
-    //         fprintf(stderr, "Ok, no need to demote\n");
-    //         demo_size = 0; // No need to demote
-    //         free(demote_pages);
-    //         demote_pages = NULL;
-    //     }
-    //     else
-    //     {
+    // entering promotion, re-calculate free local size
+    int cur_dram_free = check_dram_free();
+    cur_dram_free -= SYS_RESERVE; // adjust size
+    if (cur_dram_free <= 0)
+        cur_dram_free = 0;
+    free_dram_pages = cur_dram_free * 256;
+    fprintf(stderr, "cur_dram_free: %d MB\n", cur_dram_free);
 
-    //     }
-    // }
-
+    populate_mig_pages_eager(promote_pages, &promo_size, &free_dram_pages, bkt_split, true); // populate promo pages
     if (promo_size > 0 && free_dram_pages > 0)
     {
-        fprintf(stderr, "free dram pages: %d (pages), needed promo: %d (pages)\n", free_dram_pages, promo_size);
+        fprintf(stderr, "before filtering  promo_size: %d, free dram pages: %d\n", promo_size, free_dram_pages);
         if (free_dram_pages < promo_size) // this is for safely
         {
             promo_size = free_dram_pages;
@@ -4611,8 +4644,6 @@ void *manual_trigger_scan(void *arg)
         //     // fast_scan_idx = -2;
         // }
         // }
-        if (very_first_bk)
-            very_first_bk = false;
 
         // if (fast_scan_idx == 3)
         // {
@@ -4638,6 +4669,8 @@ void *manual_trigger_scan(void *arg)
             total_migration_time += cur_mig_time;
             fprintf(stderr, "total_migration_time: %.3f\n", total_migration_time);
             max_num_hot = 0;
+            if (very_first_bk)
+                very_first_bk = false;
             if (doIO_)
             {
                 fprintf(stderr, "flushing...\n");
@@ -4684,6 +4717,7 @@ void *manual_trigger_scan(void *arg)
         //         usleep((int)cur_fast_time * 1000000);
         //     }
         //     else
+
         usleep(global_bookkeep_args->sample_dur);
     }
     if (global_demo_mode == 3)
