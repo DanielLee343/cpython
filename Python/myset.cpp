@@ -511,7 +511,7 @@ extern "C" void insert_into_bucket(uintptr_t page_addr, short hotness, bool loca
 
         if (bkt_idx_before != bkt_idx_after)
         {
-            // if (bkt_idx_before != -1)
+            if (!(bkt_idx_before == 0 && bkt_page_num_pair[bkt_idx_before] == 0))
             {
                 bkt_page_num_pair[bkt_idx_before]--; // Only decrement if bkt_idx_before is valid
             }
@@ -536,7 +536,7 @@ extern "C" void insert_into_bucket_only_exists(uintptr_t page_addr, short hotnes
         short bkt_idx_after = get_bkt_idx(it->second.first);
         if (bkt_idx_before != bkt_idx_after)
         {
-            // if (bkt_idx_before != -1)
+            if (!(bkt_idx_before == 0 && bkt_page_num_pair[bkt_idx_before] == 0))
             {
                 bkt_page_num_pair[bkt_idx_before]--; // Only decrement if bkt_idx_before is valid
             }
